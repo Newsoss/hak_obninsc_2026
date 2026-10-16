@@ -3,38 +3,38 @@
 @tailwind utilities;
 
 :root {
-  --canvas: 241 245 249;
+  --canvas: 244 244 245;
   --surface: 255 255 255;
-  --raised: 248 250 252;
-  --line: 226 232 240;
-  --ink: 15 23 42;
-  --muted: 71 85 105;
-  --faint: 148 163 184;
-  --accent: 8 145 178;
-  --accent-soft: 224 247 252;
+  --raised: 244 244 245;
+  --line: 222 222 226;
+  --ink: 24 24 27;
+  --muted: 82 82 91;
+  --faint: 140 140 150;
+  --accent: 37 99 235;
+  --accent-soft: 239 245 255;
   --on-accent: 255 255 255;
-  --good: 5 150 105;
-  --warn: 217 119 6;
-  --bad: 225 29 72;
-  --stage: 226 232 240;
+  --good: 22 128 61;
+  --warn: 180 83 9;
+  --bad: 200 30 30;
+  --stage: 228 228 231;
   color-scheme: light;
 }
 
 .dark {
-  --canvas: 7 11 19;
-  --surface: 13 19 31;
-  --raised: 20 28 43;
-  --line: 33 45 64;
-  --ink: 226 232 240;
-  --muted: 148 163 184;
-  --faint: 100 116 139;
-  --accent: 34 211 238;
-  --accent-soft: 14 52 66;
-  --on-accent: 4 20 28;
-  --good: 52 211 153;
-  --warn: 251 191 36;
-  --bad: 251 113 133;
-  --stage: 3 6 12;
+  --canvas: 24 24 27;
+  --surface: 32 32 36;
+  --raised: 42 42 47;
+  --line: 58 58 64;
+  --ink: 236 236 239;
+  --muted: 170 170 178;
+  --faint: 120 120 130;
+  --accent: 96 155 250;
+  --accent-soft: 35 45 66;
+  --on-accent: 255 255 255;
+  --good: 74 190 120;
+  --warn: 230 160 60;
+  --bad: 240 100 100;
+  --stage: 17 17 19;
   color-scheme: dark;
 }
 
@@ -42,50 +42,28 @@
   html,
   body,
   #root {
-    @apply min-h-full;
+    @apply h-full;
   }
   body {
-    @apply bg-canvas font-sans text-ink antialiased;
-    background-image:
-      radial-gradient(at 0% 0%, rgb(var(--accent) / 0.08) 0, transparent 45%),
-      radial-gradient(at 100% 0%, rgb(99 102 241 / 0.07) 0, transparent 45%);
-    background-attachment: fixed;
-  }
-  ::selection {
-    @apply bg-accent text-on-accent;
+    @apply bg-canvas font-sans text-sm text-ink antialiased;
   }
 }
 
 @layer components {
-  .panel {
-    @apply rounded-2xl border border-line bg-surface/80 backdrop-blur-xl;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.12);
-  }
-  .label {
-    @apply text-[11px] font-semibold uppercase tracking-wider text-muted;
-  }
   .focus-ring {
-    @apply outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface;
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-accent/50;
   }
-  .checker {
-    background-color: rgb(var(--stage));
-    background-image:
-      linear-gradient(45deg, rgb(var(--line) / 0.35) 25%, transparent 25%),
-      linear-gradient(-45deg, rgb(var(--line) / 0.35) 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, rgb(var(--line) / 0.35) 75%),
-      linear-gradient(-45deg, transparent 75%, rgb(var(--line) / 0.35) 75%);
-    background-size: 20px 20px;
-    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  .field {
+    @apply focus-ring h-8 rounded-md border border-line bg-surface px-2 text-sm text-ink;
   }
 }
 
-/* Ползунки */
 input[type='range'].range {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 4px;
-  border-radius: 999px;
+  height: 3px;
+  border-radius: 2px;
   background: linear-gradient(
     to right,
     rgb(var(--accent)) 0,
@@ -97,45 +75,16 @@ input[type='range'].range {
 }
 input[type='range'].range::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: rgb(var(--surface));
-  border: 2px solid rgb(var(--accent));
-  box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
-  transition: transform 0.12s;
-}
-input[type='range'].range::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
-}
-input[type='range'].range::-moz-range-thumb {
   width: 12px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: 50%;
   background: rgb(var(--surface));
-  border: 2px solid rgb(var(--accent));
+  border: 1px solid rgb(var(--faint));
 }
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-thumb {
-  background: rgb(var(--line));
-  border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(var(--faint));
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
-}
-.animate-toast {
-  animation: toast-in 0.2s ease-out;
+input[type='range'].range::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--faint));
 }

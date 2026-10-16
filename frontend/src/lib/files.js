@@ -29,6 +29,5 @@ export function formatBytes(bytes) {
 export function frameMeta(frame) {
   if (!frame) return '';
   const depth = frame.dtype === 'float32' ? '32 бит float' : `${frame.bit_depth} бит`;
-  const channels = frame.channels === 1 ? 'Ч/Б' : 'RGB';
-  return `${frame.width}×${frame.height} · ${depth} · ${channels}`;
+  return `${frame.width}×${frame.height}, ${depth}${frame.channels === 1 ? ', ч/б' : ''}`;
 }

@@ -1,56 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { zipSync } from 'fflate';
-import {
-  Archive,
-  CheckCircle2,
-  Download,
-  Eye,
-  FileImage,
-  Files,
-  Layers,
-  Play,
-  Sparkles,
-  Square,
-  Trash2,
-  Upload,
-  AlertTriangle,
-} from 'lucide-react';
 import { demoFile, processFile } from '../api/client';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
 import FrameSlot from './FrameSlot';
-import { Button, Segmented, Spinner } from './ui';
+import { Button, Section, Spinner } from './ui';
 
 const CONCURRENCY = 3;
 const FORMATS = [
-  { value: '', label: 'Как исходник' },
+  { value: '', label: 'Как у исходника' },
   { value: 'tiff', label: 'TIFF' },
   { value: 'png', label: 'PNG' },
   { value: 'jpeg', label: 'JPEG' },
 ];
+const BOM = String.fromCharCode(0xfeff);
 
 let nextId = 1;
 
-function StatusBadge({ item }) {
-  if (item.status === 'done')
-    return (
-      <span className="inline-flex items-center gap-1 text-good">
-        <CheckCircle2 className="h-3.5 w-3.5" /> готово
-      </span>
-    );
+function Status({ item }) {
+  if (item.status === 'done') return <span className="text-good">Готово</span>;
   if (item.status === 'processing')
     return (
-      <span className="inline-flex items-center gap-1 text-accent">
-        <Spinner className="h-3.5 w-3.5" /> обработка
+      <span className="inline-flex items-center gap-1 text-muted">
+        <Spinner className="h-3 w-3" /> Обработка
       </span>
     );
   if (item.status === 'error')
     return (
-      <span className="inline-flex items-center gap-1 text-bad" title={item.error}>
-        <AlertTriangle className="h-3.5 w-3.5" /> ошибка
+      <span className="text-bad" title={item.error}>
+        Ошибка
       </span>
     );
-  return <span className="text-faint">в очереди</span>;
+  return <span className="text-faint">Ожидает</span>;
 }
 
 function buildReport(items) {
@@ -71,7 +52,7 @@ function buildReport(items) {
       it.error ?? '',
     ]);
   }
-  return '﻿' + rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
+  return BOM + rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
 }
 
 /** Журнал преобразований серии: калибровка, профиль и контрольные суммы каждого файла. */
@@ -101,7 +82,7 @@ function buildLog(items, frames, settings) {
   );
 }
 
-export default function BatchView({ frames, uploading, onFrame, onClearDark, settings, presetId, onOpen, onCount, notify }) {
+export default function BatchView({ frames, uploading, onFrame, onClearDark, settings, presetId, onOpen, onCount, log }) {
   const [items, setItems] = useState([]);
   const [format, setFormat] = useState('');
   const [running, setRunning] = useState(false);
@@ -114,10 +95,11 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
 
   useEffect(() => onCount(items.length), [items.length, onCount]);
   useEffect(
-    () => () => itemsRef.current.forEach((it) => {
-      if (it.thumb) URL.revokeObjectURL(it.thumb);
-      if (it.resultUrl) URL.revokeObjectURL(it.resultUrl);
-    }),
+    () => () =>
+      itemsRef.current.forEach((it) => {
+        if (it.thumb) URL.revokeObjectURL(it.thumb);
+        if (it.resultUrl) URL.revokeObjectURL(it.resultUrl);
+      }),
     [],
   );
 
@@ -147,21 +129,21 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
 
   const loadDemo = async () => {
     try {
-      const names = ['sample-1', 'sample-2', 'sample-3', 'sample-4'];
-      addFiles(await Promise.all(names.map(demoFile)));
+      addFiles(await Promise.all(['sample-1', 'sample-2', 'sample-3'].map(demoFile)));
     } catch (err) {
-      notify(err.message);
+      log(`Примеры не загрузились: ${err.message}`, 'error');
     }
   };
 
   const run = async () => {
-    // Все готово — повторный запуск переобрабатывает серию (например, с новым профилем)
+    // Если всё уже готово — обрабатываем серию заново (например, после смены настроек)
     const pending = itemsRef.current.filter((it) => it.status !== 'done');
     const queue = pending.length ? pending : [...itemsRef.current];
     if (!queue.length || !frames.bright) return;
     stopRef.current = false;
     setRunning(true);
     const started = performance.now();
+    log(`Пакет: обработка ${queue.length} файл(ов), светлое поле ${frames.bright.name}${frames.dark ? `, темновой кадр ${frames.dark.name}` : ''}`);
     const options = { brightId: frames.bright.id, darkId: frames.dark?.id, settings, format };
 
     const worker = async () => {
@@ -172,21 +154,25 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
           const result = await processFile(item.file, options);
           const resultUrl = browserCanShow(result.blob.type) ? URL.createObjectURL(result.blob) : null;
           patch(item.id, { status: 'done', result, resultUrl });
+          log(`${item.file.name} → ${result.name}, ${result.report.elapsed_ms.toFixed(0)} мс`);
         } catch (err) {
           patch(item.id, { status: 'error', error: err.message });
+          log(`${item.file.name}: ${err.message}`, 'error');
         }
       }
     };
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    setElapsed(performance.now() - started);
+    const total = performance.now() - started;
+    setElapsed(total);
+    log(`Пакет ${stopRef.current ? 'остановлен' : 'готов'} за ${(total / 1000).toFixed(1)} с`);
     setRunning(false);
   };
 
   const downloadZip = () => {
-    const done = items.filter((it) => it.status === 'done');
-    Promise.all(done.map((it) => it.result.blob.arrayBuffer())).then((buffers) => {
+    const finished = items.filter((it) => it.status === 'done');
+    Promise.all(finished.map((it) => it.result.blob.arrayBuffer())).then((buffers) => {
       const entries = {};
-      done.forEach((it, i) => {
+      finished.forEach((it, i) => {
         let name = it.result.name;
         for (let n = 1; entries[name]; n += 1) name = it.result.name.replace(/(\.[^.]+)$/, `_${n}$1`);
         entries[name] = [new Uint8Array(buffers[i]), { level: 0 }];
@@ -194,6 +180,7 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
       entries['report.csv'] = new TextEncoder().encode(buildReport(items));
       entries['processing.json'] = new TextEncoder().encode(buildLog(items, frames, settings));
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
+      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), report.csv, processing.json`);
     });
   };
 
@@ -204,158 +191,164 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
       await new Promise((r) => setTimeout(r, 250));
     }
     saveBlob(new Blob([buildLog(items, frames, settings)], { type: 'application/json' }), 'processing.json');
+    log(`Сохранено по одному: ${items.filter((x) => x.status === 'done').length} файл(ов) и processing.json`);
   };
 
   const done = items.filter((it) => it.status === 'done');
   const pendingCount = items.length - done.length;
   const failed = items.filter((it) => it.status === 'error').length;
   const progress = items.length ? ((done.length + failed) / items.length) * 100 : 0;
-  const avg = (key, field) =>
-    done.reduce((s, it) => s + it.result.report[key][field], 0) / Math.max(done.length, 1);
   const preset = PRESETS.find((p) => p.id === presetId);
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl gap-5 p-4 lg:grid-cols-[300px_1fr] lg:p-6">
+    <div className="mx-auto grid w-full max-w-5xl gap-6 p-4 lg:grid-cols-[260px_1fr] lg:p-6">
       <aside className="space-y-5">
-        <div className="panel space-y-3 p-4">
-          <h3 className="label">Калибровка серии</h3>
-          <FrameSlot role="bright" title="Светлое поле" hint="Кадр без образца" frame={frames.bright}
-            busy={uploading.bright} onFile={(f) => onFrame('bright', f)} />
-          <FrameSlot role="dark" title="Темновой кадр" hint="Затвор закрыт" optional frame={frames.dark}
-            busy={uploading.dark} onFile={(f) => onFrame('dark', f)} onClear={onClearDark} />
-        </div>
+        <Section title="Калибровка">
+          <FrameSlot title="Светлое поле" frame={frames.bright} busy={uploading.bright} onFile={(f) => onFrame('bright', f)} />
+          <FrameSlot title="Темновой кадр" optional frame={frames.dark} busy={uploading.dark}
+            onFile={(f) => onFrame('dark', f)} onClear={onClearDark} />
+        </Section>
 
-        <div className="panel space-y-3 p-4">
-          <h3 className="label">Профиль</h3>
-          <p className="text-xs leading-relaxed text-muted">
-            Ко всем снимкам применяется один профиль из режима «Сравнение»:{' '}
-            <span className="font-semibold text-ink">{preset ? preset.name : 'пользовательский'}</span>
-            {settings.neutralize_color ? ', нейтрализация оттенка' : ''}
-            {settings.smoothing ? `, сглаживание σ ${settings.smoothing}` : ''}.
+        <Section title="Настройки">
+          <p className="text-xs text-muted">
+            Берутся со вкладки «Обработка»: {preset ? preset.name.toLowerCase() : 'свои настройки'}
+            {settings.neutralize_color ? ', без оттенка осветителя' : ''}
+            {settings.smoothing ? `, сглаживание ${settings.smoothing} px` : ''}.
           </p>
-          <div>
-            <div className="label mb-1.5">Формат результата</div>
-            <Segmented options={FORMATS} value={format} onChange={setFormat} className="w-full" />
-          </div>
-        </div>
+          <label className="block text-xs text-muted">
+            Формат файлов
+            <select className="field mt-1 w-full" value={format} onChange={(e) => setFormat(e.target.value)}>
+              {FORMATS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </Section>
       </aside>
 
-      <section className="min-w-0 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="mr-auto">
-            <h2 className="flex items-center gap-2 text-lg font-bold">
-              <Layers className="h-5 w-5 text-accent" /> Пакетная обработка
-            </h2>
-            <p className="text-xs text-muted">Серия снимков одним калибровочным профилем · результат в исходной битности</p>
-          </div>
-          <Button icon={Sparkles} size="sm" onClick={loadDemo} disabled={running}>Демо-серия</Button>
+      <section className="min-w-0 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="mr-auto text-base font-semibold">Пакетная обработка</h2>
+          <Button size="sm" onClick={() => input.current?.click()} disabled={running}>
+            Добавить файлы
+          </Button>
+          <Button size="sm" onClick={loadDemo} disabled={running}>
+            Добавить примеры
+          </Button>
           {running ? (
-            <Button icon={Square} onClick={() => { stopRef.current = true; }}>Стоп</Button>
+            <Button size="sm" onClick={() => { stopRef.current = true; }}>
+              Остановить
+            </Button>
           ) : (
             <Button
+              size="sm"
               variant="primary"
-              icon={Play}
               onClick={run}
               disabled={!frames.bright || !items.length}
               title={!frames.bright ? 'Сначала загрузите светлое поле' : undefined}
             >
-              {pendingCount ? `Обработать ${pendingCount}` : items.length ? 'Обработать заново' : 'Обработать'}
+              {pendingCount || !items.length ? 'Обработать' : 'Обработать заново'}
             </Button>
           )}
-          <Button icon={Files} onClick={downloadFiles} disabled={!done.length || running} title="Сохранить каждый результат отдельным файлом">
-            Файлами
-          </Button>
-          <Button variant="good" icon={Archive} onClick={downloadZip} disabled={!done.length || running} title="Результаты + report.csv + processing.json">
-            ZIP
-          </Button>
         </div>
 
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => input.current?.click()}
-          onKeyDown={(e) => e.key === 'Enter' && input.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-          onDragLeave={() => setOver(false)}
-          onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
-          className={`focus-ring flex cursor-pointer items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-6 transition ${
-            over ? 'border-accent bg-accent-soft' : 'border-line bg-surface/60 hover:border-accent/60'
-          }`}
-        >
-          <input ref={input} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-          <Upload className="h-6 w-6 text-accent" />
-          <div>
-            <p className="text-sm font-semibold">Перетащите снимки серии или нажмите для выбора</p>
-            <p className="text-xs text-muted">TIFF 8/16/32 бит, PNG, JPEG, BMP — сколько угодно файлов</p>
+        <input ref={input} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+
+        {!items.length ? (
+          <div
+            onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+            onDragLeave={() => setOver(false)}
+            onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
+            className={`rounded-md border border-dashed p-10 text-center text-sm text-muted ${
+              over ? 'border-accent bg-accent-soft' : 'border-line'
+            }`}
+          >
+            Перетащите сюда снимки серии (TIFF, PNG, JPEG) или нажмите «Добавить файлы».
+            <br />
+            Ко всем применяются одна калибровка и одни настройки.
           </div>
-        </div>
+        ) : (
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+            className="overflow-hidden rounded-md border border-line bg-surface"
+          >
+            <table className="w-full table-fixed text-sm">
+              <thead className="border-b border-line bg-raised text-left text-xs text-muted">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Файл</th>
+                  <th className="hidden w-20 px-3 py-2 font-medium sm:table-cell">Размер</th>
+                  <th className="w-20 px-3 py-2 font-medium">Время</th>
+                  <th className="w-24 px-3 py-2 font-medium">Статус</th>
+                  <th className="w-40 px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {items.map((it) => (
+                  <tr key={it.id}>
+                    <td className="px-3 py-1.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded border border-line bg-raised">
+                          {(it.resultUrl || it.thumb) && (
+                            <img src={it.resultUrl || it.thumb} alt="" className="h-full w-full object-cover" />
+                          )}
+                        </div>
+                        <span className="truncate" title={it.error || it.file.name}>
+                          {it.file.name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="hidden whitespace-nowrap px-3 text-muted sm:table-cell">{formatBytes(it.file.size)}</td>
+                    <td className="whitespace-nowrap px-3 tabular-nums text-muted">
+                      {it.result ? `${it.result.report.elapsed_ms.toFixed(0)} мс` : '—'}
+                    </td>
+                    <td className="whitespace-nowrap px-3 text-xs">
+                      <Status item={it} />
+                    </td>
+                    <td className="whitespace-nowrap px-3 text-right text-xs">
+                      <button type="button" className="text-accent hover:underline" onClick={() => onOpen(it.file)}>
+                        Открыть
+                      </button>
+                      {it.result && (
+                        <button type="button" className="ml-3 text-accent hover:underline"
+                          onClick={() => saveBlob(it.result.blob, it.result.name)}>
+                          Скачать
+                        </button>
+                      )}
+                      {!running && (
+                        <button type="button" className="ml-3 text-faint hover:text-bad" title="Убрать из списка"
+                          onClick={() => remove(it.id)}>
+                          ✕
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {items.length > 0 && (
-          <div className="panel overflow-hidden">
-            <div className="space-y-2 border-b border-line p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="font-semibold">
-                  {done.length} из {items.length} готово{failed ? ` · ошибок: ${failed}` : ''}
-                </span>
-                {done.length > 0 && (
-                  <span className="font-mono text-muted">
-                    неравномерность {avg('before', 'nonuniformity').toFixed(1)}% →{' '}
-                    <span className="font-semibold text-good">{avg('after', 'nonuniformity').toFixed(1)}%</span>
-                    {elapsed && !running ? ` · ${(elapsed / 1000).toFixed(1)} с` : ''}
-                  </span>
-                )}
-                {!running && (
-                  <button type="button" className="text-faint hover:text-bad" onClick={() => items.forEach((it) => remove(it.id))}>
-                    очистить
-                  </button>
-                )}
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-line">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-300" style={{ width: `${progress}%` }} />
-              </div>
+          <div className="space-y-2">
+            <div className="h-1 overflow-hidden rounded bg-line">
+              <div className="h-full bg-accent transition-all" style={{ width: `${progress}%` }} />
             </div>
-
-            <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
-              {items.map((it) => {
-                const r = it.result?.report;
-                return (
-                  <li key={it.id} className="flex items-center gap-3 px-4 py-2.5 text-xs">
-                    <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-raised ring-1 ring-line">
-                      {it.resultUrl || it.thumb ? (
-                        <img src={it.resultUrl || it.thumb} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <FileImage className="m-2.5 h-5 w-5 text-faint" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium" title={it.file.name}>{it.file.name}</p>
-                      <p className="truncate font-mono text-[10px] text-faint">
-                        {formatBytes(it.file.size)}
-                        {it.error ? ` · ${it.error}` : ''}
-                      </p>
-                    </div>
-                    {r && (
-                      <div className="hidden text-right font-mono text-[11px] sm:block">
-                        <div>
-                          <span className="text-faint">{r.before.nonuniformity.toFixed(1)}% → </span>
-                          <span className="font-semibold text-good">{r.after.nonuniformity.toFixed(1)}%</span>
-                        </div>
-                        <div className="text-faint">{r.elapsed_ms.toFixed(0)} мс</div>
-                      </div>
-                    )}
-                    <div className="w-24 text-right font-mono text-[11px]">
-                      <StatusBadge item={it} />
-                    </div>
-                    <div className="flex shrink-0 gap-0.5">
-                      <Button variant="ghost" size="icon" icon={Eye} title="Открыть в сравнении" onClick={() => onOpen(it.file)} />
-                      <Button variant="ghost" size="icon" icon={Download} title="Скачать" disabled={!it.result}
-                        onClick={() => saveBlob(it.result.blob, it.result.name)} />
-                      <Button variant="ghost" size="icon" icon={Trash2} title="Убрать" disabled={running} onClick={() => remove(it.id)} />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+              <span className="mr-auto">
+                Готово {done.length} из {items.length}
+                {failed ? `, с ошибкой ${failed}` : ''}
+                {elapsed && !running ? ` · ${(elapsed / 1000).toFixed(1)} с` : ''}
+              </span>
+              <Button size="sm" onClick={downloadFiles} disabled={!done.length || running}>
+                Скачать по одному
+              </Button>
+              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты, report.csv и processing.json">
+                Скачать ZIP
+              </Button>
+            </div>
           </div>
         )}
       </section>

@@ -11,6 +11,9 @@ app = FastAPI(
     title="MicroCleaner API",
     description="Коррекция неравномерного освещения микроснимков методом flat-field correction",
     version="2.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(

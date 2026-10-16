@@ -1,15 +1,8 @@
 import { useRef, useState } from 'react';
-import { ImagePlus, X } from 'lucide-react';
 import { ACCEPT, frameMeta, isImageFile } from '../lib/files';
 import { Spinner } from './ui';
 
-const TONES = {
-  raw: 'bg-sky-500',
-  bright: 'bg-amber-400',
-  dark: 'bg-slate-500',
-};
-
-export default function FrameSlot({ role, title, hint, frame, busy, optional, onFile, onClear }) {
+export default function FrameSlot({ title, frame, busy, optional, onFile, onClear }) {
   const input = useRef(null);
   const [over, setOver] = useState(false);
 
@@ -34,50 +27,42 @@ export default function FrameSlot({ role, title, hint, frame, busy, optional, on
         setOver(false);
         pick(e.dataTransfer.files);
       }}
-      className={`focus-ring group relative flex h-[68px] cursor-pointer items-center gap-3 overflow-hidden rounded-xl border p-2 pr-3 transition ${
-        over ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:border-faint'
+      className={`focus-ring flex cursor-pointer items-center gap-2.5 rounded-md border p-1.5 ${
+        over ? 'border-accent bg-accent-soft' : 'border-line hover:bg-raised'
       }`}
     >
       <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => pick(e.target.files)} />
 
-      <div className="relative h-[52px] w-[52px] shrink-0 overflow-hidden rounded-lg bg-raised ring-1 ring-line">
-        {frame ? (
-          <img src={frame.thumbnail} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <ImagePlus className="absolute inset-0 m-auto h-5 w-5 text-faint transition group-hover:text-accent" />
-        )}
+      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded border border-line bg-raised">
+        {frame && <img src={frame.thumbnail} alt="" className="h-full w-full object-cover" />}
         {busy && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70">
-            <Spinner className="h-4 w-4 text-accent" />
+            <Spinner className="h-3.5 w-3.5 text-muted" />
           </div>
         )}
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${TONES[role]}`} />
-          <span className="truncate text-xs font-semibold text-ink">{title}</span>
-          <span className="ml-auto shrink-0 font-mono text-[10px] text-faint">
-            {optional ? 'опц.' : 'обяз.'}
-          </span>
+        <div className="text-sm">{title}</div>
+        <div className="truncate text-xs text-muted" title={frame?.name}>
+          {frame
+            ? `${frame.name}, ${frameMeta(frame)}`
+            : optional
+              ? 'Необязательно. Перетащите или нажмите'
+              : 'Перетащите файл или нажмите'}
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-muted" title={frame?.name}>
-          {frame ? frame.name : hint}
-        </p>
-        <p className="truncate font-mono text-[10px] text-faint">{frame ? frameMeta(frame) : 'TIFF · PNG · JPEG'}</p>
       </div>
 
       {frame && onClear && (
         <button
           type="button"
-          title="Убрать"
           onClick={(e) => {
             e.stopPropagation();
             onClear();
           }}
-          className="focus-ring absolute right-1 top-1 rounded-md p-1 text-faint opacity-0 transition hover:bg-raised hover:text-bad group-hover:opacity-100"
+          className="focus-ring rounded px-1 text-xs text-faint hover:text-ink"
         >
-          <X className="h-3.5 w-3.5" />
+          Убрать
         </button>
       )}
     </div>
