@@ -215,3 +215,61 @@ def test_demo_from_specimens_gets_synthetic_light(tmp_path, monkeypatch):
     # Искусственная засветка убирается почти полностью
     assert body["metrics"]["before"]["nonuniformity"] > 15
     assert body["metrics"]["after"]["nonuniformity"] < 3
+
+
+def test_preview_and_export_without_bright_field(demo_ids):
+    body = client.post("/api/process/preview", json={"raw_id": demo_ids["sample-1"]}).json()
+    assert "Приблизительная коррекция" in body["approximate"]
+    assert body["metrics"]["after"]["nonuniformity"] < body["metrics"]["before"]["nonuniformity"] / 3
+    out = client.post("/api/process/export", json={"raw_id": demo_ids["sample-1"], "format": "tiff"})
+    log = json.loads(tifffile.TiffFile(io.BytesIO(out.content)).pages[0].description)
+    assert log["approximate"] is True and log["bright_field"]["estimated"]["method"] == "gaussian"
+
+
+def test_flat_from_series_used_for_batch():
+    from core import demo as demo_core
+
+    optics, dark = demo_core._optics(), demo_core._dark(np.random.default_rng(11))
+    series = [
+        image_io.encode_image(
+            demo_core._to_u8(dark + demo_core.BRIGHT_LEVEL * optics * demo_core._specimen(s), np.random.default_rng(s)),
+            "png",
+        )[0]
+        for s in range(1, 7)
+    ]
+    too_few = client.post("/api/flat/series", files=[("files", (f"{i}.png", d)) for i, d in enumerate(series[:3])])
+    assert too_few.status_code == 400 and "минимум 5" in too_few.json()["detail"]
+
+    flat = client.post("/api/flat/series", files=[("files", (f"{i}.png", d)) for i, d in enumerate(series)]).json()
+    assert flat["estimated"]["method"] == "median" and flat["estimated"]["count"] == 6
+    response = client.post("/api/process/file", files={"raw": ("s1.png", series[0])}, data={"bright_id": flat["id"]})
+    report = json.loads(response.headers["x-correction-report"])
+    assert report["after"]["nonuniformity"] < report["before"]["nonuniformity"] / 5
+
+
+def test_average_calibration_frames():
+    from core import demo as demo_core
+
+    light = demo_core._dark(np.random.default_rng(11)) + demo_core.BRIGHT_LEVEL * demo_core._optics()
+    frames = [image_io.encode_image(demo_core._to_u8(light, np.random.default_rng(i)), "png")[0] for i in range(6)]
+    info = client.post(
+        "/api/frames/average?role=bright", files=[("files", (f"b{i}.png", f)) for i, f in enumerate(frames)]
+    ).json()
+    assert info["averaged"]["count"] == 6 and info["averaged"]["noise_reduction"] >= 2
+    assert info["dtype"] == "float32" and info["checks"] == []
+
+    mismatch = [("files", ("a.png", frames[0])), ("files", ("b.png", image_io.encode_image(np.zeros((10, 10), np.uint8), "png")[0]))]
+    response = client.post("/api/frames/average", files=mismatch)
+    assert response.status_code == 400 and "разного размера" in response.json()["detail"]
+
+
+def test_verify_on_reference():
+    body = client.post("/api/verify").json()
+    assert body["passed"] is True
+    rows = {r["method"]: r for r in body["rows"]}
+    assert rows["Flat-field со светлым полем"]["mean_error"] < 1.5
+    assert rows["Flat-field со светлым полем"]["psnr"] > rows["Без коррекции"]["psnr"] + 15
+    specimen = np.full((300, 400, 3), 235, np.uint8)
+    specimen[100:140, 100:140] = (150, 60, 120)
+    own = client.post("/api/verify", files={"file": ("mine.png", image_io.encode_image(specimen, "png")[0])}).json()
+    assert own["specimen"] == "mine.png" and own["passed"] is True

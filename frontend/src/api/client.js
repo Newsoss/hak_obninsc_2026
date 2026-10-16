@@ -12,16 +12,33 @@ async function errorFrom(res) {
   return new Error(detail);
 }
 
+const pause = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
+
 async function request(path, options = {}) {
-  let res;
-  try {
-    res = await fetch(BASE + path, options);
-  } catch (err) {
-    if (err.name === 'AbortError') throw err;
-    throw new Error('Сервер недоступен — запущен ли backend на :8000?');
+  // 429 — сервер занят или лимит запросов: ждем, сколько он просит, и повторяем
+  for (let attempt = 0; ; attempt += 1) {
+    let res;
+    try {
+      res = await fetch(BASE + path, options);
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      throw new Error('Сервер недоступен — запущен ли backend на :8000?');
+    }
+    if (res.status === 429 && attempt < 5) {
+      const wait = Math.min(10, Number(res.headers.get('Retry-After')) || 1);
+      await pause(wait * 1000 * (attempt + 1), options.signal);
+      continue;
+    }
+    if (!res.ok) throw await errorFrom(res);
+    return res;
   }
-  if (!res.ok) throw await errorFrom(res);
-  return res;
 }
 
 const json = (body) => ({
@@ -55,6 +72,27 @@ export async function fetchPreview(refs, signal) {
 
 export async function exportImage(refs) {
   return fileResult(await request('/api/process/export', json(refs)));
+}
+
+/** Среднее нескольких кадров светлого поля или темнового кадра (master flat / master dark). */
+export async function averageFrames(files, role) {
+  const body = new FormData();
+  files.forEach((file) => body.append('files', file));
+  return (await request(`/api/frames/average?role=${role}`, { method: 'POST', body })).json();
+}
+
+/** Проверка метода на эталоне: встроенный снимок или свой чистый снимок. */
+export async function verifyMethod(file) {
+  const body = new FormData();
+  if (file) body.append('file', file);
+  return (await request('/api/verify', { method: 'POST', body })).json();
+}
+
+/** Светлое поле, оцененное как медиана по серии снимков (когда его не снимали). */
+export async function estimateFlat(files) {
+  const body = new FormData();
+  files.forEach((file) => body.append('files', file));
+  return (await request('/api/flat/series', { method: 'POST', body })).json();
 }
 
 /** Значения пикселя до/после в исходных единицах. */

@@ -117,3 +117,44 @@ def test_source_pixels_are_not_modified():
     snapshot = raw.copy()
     flat_field_correct(raw, bright)
     assert np.array_equal(raw, snapshot)
+
+
+def _series(n):
+    """Серия снимков разных полей зрения с одинаковой засветкой (как с одного микроскопа)."""
+    optics = demo._optics()
+    dark = demo._dark(np.random.default_rng(11))
+    return [
+        demo._to_u8(dark + demo.BRIGHT_LEVEL * optics * demo._specimen(s), np.random.default_rng(300 + s))
+        for s in range(1, n + 1)
+    ]
+
+
+def test_median_flat_matches_real_calibration():
+    from core import estimate
+    from core.flat_field import apply_profile, build_profile, to_dtype
+
+    series = _series(10)
+    flat, warnings = estimate.median_flat(series)
+    estimated = to_dtype(apply_profile(series[0], build_profile(flat)), np.uint8)
+    real = flat_field_correct(series[0], demo.generate("bright"), demo.generate("dark"))
+    assert warnings == []
+    assert metrics.uniformity(estimated)["nonuniformity"] < metrics.uniformity(real)["nonuniformity"] + 1
+
+
+def test_median_flat_needs_enough_images():
+    from core import estimate
+
+    with pytest.raises(ValueError):
+        estimate.median_flat(_series(3))
+    _, warnings = estimate.median_flat(_series(5))
+    assert any("Снимков всего 5" in w for w in warnings)
+
+
+def test_gaussian_flat_is_approximate_but_helps():
+    from core import estimate
+    from core.flat_field import apply_profile, build_profile, to_dtype
+
+    raw = _series(1)[0]
+    corrected = to_dtype(apply_profile(raw, build_profile(estimate.gaussian_flat(raw))), np.uint8)
+    before, after = metrics.uniformity(raw), metrics.uniformity(corrected)
+    assert after["nonuniformity"] < before["nonuniformity"] / 4

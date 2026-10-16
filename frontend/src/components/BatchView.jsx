@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { zipSync } from 'fflate';
-import { demoCatalog, demoFile, fetchThumbs, processFile } from '../api/client';
+import { demoCatalog, demoFile, estimateFlat, fetchThumbs, processFile } from '../api/client';
 import { contactSheet } from '../lib/canvas';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
@@ -9,6 +9,7 @@ import FrameSlot from './FrameSlot';
 import { Button, Section, Spinner } from './ui';
 
 const CONCURRENCY = 3;
+const MIN_SERIES = 5; // столько снимков нужно, чтобы оценить светлое поле медианой
 const FORMATS = [
   { value: '', label: 'Как у исходника' },
   { value: 'tiff', label: 'TIFF' },
@@ -62,12 +63,25 @@ async function filesFromDrop(dataTransfer) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export default function BatchView({ frames, uploading, onFrame, onClearDark, settings, presetId, onOpen, onCount, log }) {
+export default function BatchView({
+  frames,
+  uploading,
+  onFrame,
+  onFrameInfo,
+  onClearBright,
+  onClearDark,
+  settings,
+  presetId,
+  onOpen,
+  onCount,
+  log,
+}) {
   const [items, setItems] = useState([]);
   const [format, setFormat] = useState('');
   const [running, setRunning] = useState(false);
   const [over, setOver] = useState(false);
   const [elapsed, setElapsed] = useState(null);
+  const [estimating, setEstimating] = useState(false);
   const stopRef = useRef(false);
   const fileInput = useRef(null);
   const folderInput = useRef(null);
@@ -119,11 +133,30 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
   const loadDemo = async () => {
     try {
       const samples = (await demoCatalog()).filter((i) => i.name.startsWith('sample-'));
-      // Встроенный пример — три снимка, как в сценарии кейса; свой набор — целиком
-      const chosen = samples[0]?.source === 'synthetic' ? samples.slice(0, 3) : samples;
-      addFiles(await Promise.all(chosen.map(demoFile)), 'примеры');
+      addFiles(await Promise.all(samples.map(demoFile)), 'примеры');
     } catch (err) {
       log(`Примеры не загрузились: ${err.message}`, 'error');
+    }
+  };
+
+  /** Светлое поле как медиана по снимкам серии — когда его не снимали. */
+  const estimateFromSeries = async () => {
+    const files = itemsRef.current.map((it) => it.file);
+    if (files.length < MIN_SERIES) {
+      log(`Чтобы оценить светлое поле по серии, нужно минимум ${MIN_SERIES} снимков (сейчас ${files.length})`, 'error');
+      return null;
+    }
+    setEstimating(true);
+    log(`Оцениваю светлое поле по серии из ${files.length} снимков (медиана)…`);
+    try {
+      const info = await estimateFlat(files);
+      onFrameInfo('bright', info);
+      return info;
+    } catch (err) {
+      log(`Оценка светлого поля: ${err.message}`, 'error');
+      return null;
+    } finally {
+      setEstimating(false);
     }
   };
 
@@ -131,13 +164,16 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
     // Если всё уже готово — обрабатываем серию заново (например, после смены настроек)
     const pending = itemsRef.current.filter((it) => it.status !== 'done');
     const queue = pending.length ? pending : [...itemsRef.current];
-    if (!queue.length || !frames.bright) return;
+    if (!queue.length) return;
+    // Светлого поля нет — оцениваем его по самой серии
+    const bright = frames.bright ?? (await estimateFromSeries());
+    if (!bright) return;
     stopRef.current = false;
     setRunning(true);
     const started = performance.now();
-    log(`Пакет: обработка ${queue.length} файл(ов), светлое поле ${frames.bright.name}${frames.dark ? `, темновой кадр ${frames.dark.name}` : ''}`);
-    const options = { brightId: frames.bright.id, darkId: frames.dark?.id, settings, format, thumbs: true };
-    const used = { frames: { bright: frames.bright, dark: frames.dark }, settings };
+    log(`Пакет: обработка ${queue.length} файл(ов), светлое поле ${bright.name}${frames.dark ? `, темновой кадр ${frames.dark.name}` : ''}`);
+    const options = { brightId: bright.id, darkId: frames.dark?.id, settings, format, thumbs: true };
+    const used = { frames: { bright, dark: frames.dark }, settings };
 
     const worker = async () => {
       while (queue.length && !stopRef.current) {
@@ -242,9 +278,24 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
     <div className="mx-auto grid w-full max-w-5xl gap-6 p-4 lg:grid-cols-[260px_1fr] lg:p-6">
       <aside className="space-y-5">
         <Section title="Калибровка">
-          <FrameSlot title="Светлое поле" frame={frames.bright} busy={uploading.bright} onFile={(f) => onFrame('bright', f)} />
-          <FrameSlot title="Темновой кадр" optional frame={frames.dark} busy={uploading.dark}
+          <FrameSlot title="Светлое поле" multiple frame={frames.bright} busy={uploading.bright || estimating}
+            emptyText={`Нет — оценим по серии (от ${MIN_SERIES} снимков)`}
+            onFile={(f) => onFrame('bright', f)} onClear={onClearBright} />
+          <FrameSlot title="Темновой кадр" optional multiple frame={frames.dark} busy={uploading.dark}
             onFile={(f) => onFrame('dark', f)} onClear={onClearDark} />
+          {!frames.bright && (
+            <div className="space-y-1.5">
+              <Button size="sm" className="w-full justify-center" onClick={estimateFromSeries}
+                disabled={running || estimating || items.length < MIN_SERIES} busy={estimating}
+                title="Светлое поле = медиана по снимкам серии. Работает, если препарат на снимках в разных местах">
+                Оценить по серии
+              </Button>
+              <p className="text-xs text-muted">
+                Светлое поле не снимали? При {MIN_SERIES} и более снимках разных полей зрения оно будет оценено
+                по серии — каждый участок кадра берётся там, где на нём нет препарата.
+              </p>
+            </div>
+          )}
         </Section>
 
         <Section title="Настройки">
@@ -288,8 +339,14 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
               size="sm"
               variant="primary"
               onClick={run}
-              disabled={!frames.bright || !items.length}
-              title={!frames.bright ? 'Сначала загрузите светлое поле' : undefined}
+              disabled={estimating || !items.length || (!frames.bright && items.length < MIN_SERIES)}
+              title={
+                frames.bright
+                  ? undefined
+                  : items.length < MIN_SERIES
+                    ? `Загрузите светлое поле или добавьте минимум ${MIN_SERIES} снимков`
+                    : 'Светлое поле будет оценено по серии'
+              }
             >
               {pendingCount || !items.length ? 'Обработать' : 'Обработать заново'}
             </Button>

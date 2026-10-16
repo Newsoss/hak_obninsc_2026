@@ -34,6 +34,7 @@ export default function CompareViewer({
   detail,
   onViewport,
   onFit,
+  approximate = null, // текст пометки, если светлое поле оценено, а не снято
 }) {
   const box = useRef(null);
   const drag = useRef(null);
@@ -307,6 +308,15 @@ export default function CompareViewer({
             }}
           />
         </div>
+      )}
+
+      {preview && approximate && mode !== 'map' && (
+        <span
+          className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded bg-amber-500/90 px-2 py-0.5 text-xs font-medium text-black"
+          title="Светлое поле не снималось, а оценено — коррекция приблизительная"
+        >
+          {approximate}
+        </span>
       )}
 
       {!preview && !busy && (

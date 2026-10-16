@@ -30,7 +30,23 @@ export function parseProfile(text) {
 }
 
 const calibration = (frame) =>
-  frame ? { name: frame.name, sha256: frame.sha256, size: `${frame.width}x${frame.height}`, dtype: frame.dtype } : null;
+  frame
+    ? {
+        name: frame.name,
+        sha256: frame.sha256 || null,
+        size: `${frame.width}x${frame.height}`,
+        dtype: frame.dtype,
+        estimated: frame.estimated ?? undefined,
+      }
+    : null;
+
+const NOTE = 'Исследовательская обработка. Исходный файл не изменялся и должен храниться отдельно.';
+
+/** Если светлое поле оценено, а не снято, журнал честно говорит, что коррекция приблизительная. */
+function approximate(bright) {
+  const note = bright?.estimated?.note;
+  return note ? { approximate: true, note: `${note} ${NOTE}` } : { note: NOTE };
+}
 
 /** Журнал для одного сохранённого файла. */
 export function fileLog({ source, result, frames, settings }) {
@@ -44,12 +60,13 @@ export function fileLog({ source, result, frames, settings }) {
       sha256: result.report?.source_sha256 ?? source.sha256 ?? null,
       metadata: result.report?.source_metadata ?? undefined,
     },
-    bright_field: calibration(frames.bright),
+    // Сервер знает, какое светлое поле применил на самом деле (в том числе оценку по снимку)
+    bright_field: result.report?.bright_field ?? calibration(frames.bright),
     dark_field: calibration(frames.dark),
     settings,
     output: { name: result.name, sha256: result.report?.result_sha256 ?? null },
     elapsed_ms: result.report?.elapsed_ms ?? null,
-    note: 'Исследовательская обработка. Исходный файл не изменялся и должен храниться отдельно.',
+    ...approximate(result.report?.bright_field ?? frames.bright),
   });
 }
 
@@ -71,7 +88,7 @@ export function batchLog(items, frames, settings) {
       elapsed_ms: it.result?.report?.elapsed_ms ?? null,
       error: it.error ?? null,
     })),
-    note: 'Исследовательская обработка. Исходные файлы не изменялись и должны храниться отдельно.',
+    ...approximate(frames.bright),
   });
 }
 

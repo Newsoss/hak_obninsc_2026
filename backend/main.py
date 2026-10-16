@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+import security
 from api.routes import router
 
 app = FastAPI(
@@ -21,6 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "X-Correction-Report", "X-Thumbs-Id"],
 )
+
+# Порядок: последним добавленный выполняется первым — сначала пароль, потом лимиты
+app.add_middleware(security.LimitsMiddleware)
+app.add_middleware(security.BasicAuthMiddleware)
 
 app.include_router(router, prefix="/api")
 

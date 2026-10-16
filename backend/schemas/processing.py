@@ -37,11 +37,15 @@ class FrameInfo(BaseModel):
     thumbnail: str
     checks: List[str] = Field(default_factory=list, description="Замечания к калибровочному кадру")
     metadata: Optional[Dict] = Field(None, description="Метаданные исходного TIFF")
+    estimated: Optional[Dict] = Field(None, description="Светлое поле не снято, а оценено: способ и пояснение")
+    averaged: Optional[Dict] = Field(None, description="Кадр — среднее нескольких: число кадров и снижение шума")
 
 
 class FrameRefs(BaseModel):
     raw_id: str
-    bright_id: str
+    bright_id: Optional[str] = Field(
+        None, description="Светлое поле. Если не задано — оценивается по самому снимку (приблизительно)"
+    )
     dark_id: Optional[str] = None
     settings: CorrectionSettings = Field(default_factory=CorrectionSettings)
 
@@ -78,6 +82,7 @@ class PreviewResponse(BaseModel):
     elapsed_ms: float
     metrics: Dict[str, Uniformity]
     warnings: List[str] = []
+    approximate: Optional[str] = Field(None, description="Пояснение, если светлое поле оценено, а не снято")
 
 
 class DemoItem(BaseModel):

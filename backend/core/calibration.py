@@ -1,5 +1,5 @@
 """Проверка калибровочных кадров при загрузке: ошибки съемки лучше поймать до обработки серии."""
-from typing import List
+from typing import List, Tuple
 
 import cv2
 import numpy as np
@@ -69,3 +69,23 @@ def check_frame(image: np.ndarray, role: str) -> List[str]:
     if role == "dark":
         return check_dark(image)
     return []
+
+
+def temporal_noise(images: List[np.ndarray]) -> Tuple[float, float]:
+    """
+    Случайный (временной) шум одного кадра и усредненного по всем кадрам.
+    Меряется по разнице кадров, поэтому фиксированный рисунок матрицы
+    (полосы, горячие пиксели) не мешает — его усреднение и не должно убирать.
+    Шум среднего оценивается разбиением серии на две половины.
+    """
+    def crop(img):
+        lum = to_luminance(img)
+        h, w = lum.shape
+        return lum[max(0, h // 2 - 256) : h // 2 + 256, max(0, w // 2 - 256) : w // 2 + 256]
+
+    frames = [crop(img) for img in images]
+    single = float(np.std(frames[0] - frames[1])) / np.sqrt(2)
+    half = len(frames) // 2
+    first, second = np.mean(frames[:half], axis=0), np.mean(frames[half : 2 * half], axis=0)
+    averaged = float(np.std(first - second)) / 2
+    return single, averaged

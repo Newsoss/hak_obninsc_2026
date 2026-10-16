@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
-import { cropRegion, demoCatalog, demoFile, exportImage, fetchPreview, probePixel, uploadFrame } from './api/client';
+import {
+  averageFrames,
+  cropRegion,
+  demoCatalog,
+  demoFile,
+  exportImage,
+  fetchPreview,
+  probePixel,
+  uploadFrame,
+} from './api/client';
 import { frameMeta, saveBlob } from './lib/files';
 import { applyPreset, PRESETS } from './lib/presets';
 import { fileLog, jsonBlob, logName, parseProfile, profileJson } from './lib/profile';
@@ -87,20 +96,36 @@ export default function App() {
     }
   }, [dark]);
 
+  /** file — один файл или массив кадров калибровки (тогда сервер их усредняет). */
   const setFrame = useCallback(
     async (slot, file) => {
+      const several = Array.isArray(file);
       setUploading((u) => ({ ...u, [slot]: true }));
+      if (several) log(`${SLOT_NAMES[slot]}: усредняю ${file.length} кадров…`);
       try {
-        const info = await uploadFrame(file, slot);
+        const info = several ? await averageFrames(file, slot) : await uploadFrame(file, slot);
         setFrames((f) => ({ ...f, [slot]: info }));
         const pixelSize = info.metadata?.pixel_size ? `, пиксель ${info.metadata.pixel_size}` : '';
         log(`${SLOT_NAMES[slot]}: ${info.name}, ${frameMeta(info)}${pixelSize}`);
+        if (info.averaged) log(`${SLOT_NAMES[slot]}: ${info.averaged.note}`);
         info.checks.forEach((c) => log(`${SLOT_NAMES[slot]}: ${c}`, 'warn'));
       } catch (err) {
-        log(`${SLOT_NAMES[slot]}: ${file.name} — ${err.message}`, 'error');
+        const name = several ? `${file.length} кадров` : file.name;
+        log(`${SLOT_NAMES[slot]}: ${name} — ${err.message}`, 'error');
       } finally {
         setUploading((u) => ({ ...u, [slot]: false }));
       }
+    },
+    [log],
+  );
+
+  /** Кадр уже на сервере (например, светлое поле, оцененное по серии в пакете). */
+  const setFrameInfo = useCallback(
+    (slot, info) => {
+      setFrames((f) => ({ ...f, [slot]: info }));
+      log(`${SLOT_NAMES[slot]}: ${info.name}`);
+      if (info.estimated) log(info.estimated.note, 'warn');
+      info.checks.forEach((c) => log(`${SLOT_NAMES[slot]}: ${c}`, 'warn'));
     },
     [log],
   );
@@ -132,8 +157,9 @@ export default function App() {
   const settingsKey = JSON.stringify(settings);
   const refs = useMemo(
     () =>
-      frames.raw && frames.bright
-        ? { raw_id: frames.raw.id, bright_id: frames.bright.id, dark_id: frames.dark?.id ?? null, settings }
+      // Без светлого поля сервер оценит его по самому снимку (приблизительно)
+      frames.raw
+        ? { raw_id: frames.raw.id, bright_id: frames.bright?.id ?? null, dark_id: frames.dark?.id ?? null, settings }
         : null,
     [frames.raw?.id, frames.bright?.id, frames.dark?.id, settingsKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -168,6 +194,13 @@ export default function App() {
   useEffect(() => {
     setDetail(null);
   }, [frames.raw?.id]);
+
+  // Приблизительная коррекция без светлого поля — предупреждаем один раз на снимок.
+  // Об оценке по серии уже написано при её получении.
+  const approximateKey = preview?.approximate && !frames.bright ? `${frames.raw?.id}|${preview.approximate}` : '';
+  useEffect(() => {
+    if (approximateKey) log(preview.approximate, 'warn');
+  }, [approximateKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Предупреждения о калибровке пишем в лог один раз, а не при каждом движении ползунка
   const warningsKey = (preview?.warnings ?? []).join('\n');
@@ -319,12 +352,10 @@ export default function App() {
     setTab('single');
   };
 
-  const ready = frames.raw && frames.bright;
-  const emptyHint = useMemo(() => {
-    if (!frames.raw && !frames.bright) return 'Загрузите снимок и светлое поле слева или откройте пример.';
-    if (!frames.bright) return 'Нужно светлое поле — снимок того же поля зрения без препарата.';
-    return 'Загрузите снимок препарата.';
-  }, [frames.raw, frames.bright]);
+  const ready = Boolean(frames.raw);
+  const emptyHint = frames.bright
+    ? 'Загрузите снимок препарата.'
+    : 'Загрузите снимок и светлое поле слева или откройте пример. Без светлого поля коррекция будет приблизительной.';
 
   const status = useMemo(() => {
     if (tab !== 'single' || !preview) return '';
@@ -355,8 +386,10 @@ export default function App() {
             <Section title="Файлы">
               <FrameSlot title="Снимок" frame={frames.raw} busy={uploading.raw} onFile={(f) => setFrame('raw', f)} />
               <FrameSlot title="Светлое поле" frame={frames.bright} busy={uploading.bright}
-                onFile={(f) => setFrame('bright', f)} />
-              <FrameSlot title="Темновой кадр" optional frame={frames.dark} busy={uploading.dark}
+                multiple
+                emptyText="Можно несколько кадров. Без него — приблизительная оценка"
+                onFile={(f) => setFrame('bright', f)} onClear={() => setFrames((f) => ({ ...f, bright: null }))} />
+              <FrameSlot title="Темновой кадр" optional multiple frame={frames.dark} busy={uploading.dark}
                 onFile={(f) => setFrame('dark', f)} onClear={() => setFrames((f) => ({ ...f, dark: null }))} />
             </Section>
             <SettingsPanel
@@ -424,6 +457,13 @@ export default function App() {
               detail={detail?.key === resultKey ? detail : null}
               onViewport={onViewport}
               onFit={setFit}
+              approximate={
+                preview?.approximate
+                  ? frames.bright?.estimated
+                    ? 'Светлое поле оценено по серии'
+                    : 'Приблизительно: без светлого поля'
+                  : null
+              }
             />
 
           </section>
@@ -435,6 +475,8 @@ export default function App() {
           frames={frames}
           uploading={uploading}
           onFrame={setFrame}
+          onFrameInfo={setFrameInfo}
+          onClearBright={() => setFrames((f) => ({ ...f, bright: null }))}
           onClearDark={() => setFrames((f) => ({ ...f, dark: null }))}
           settings={settings}
           presetId={presetId}

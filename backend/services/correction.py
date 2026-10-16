@@ -29,7 +29,7 @@ def processing_log(
     source: Optional[Dict], bright: Optional[Dict], dark: Optional[Dict], settings: CorrectionSettings
 ) -> Dict:
     """Журнал преобразований: чем, по какой формуле и с какими параметрами получен файл."""
-    return {
+    log = {
         "software": SOFTWARE,
         "method": "flat-field correction",
         "formula": FORMULA,
@@ -39,6 +39,11 @@ def processing_log(
         "settings": settings.model_dump(),
         "note": "Исследовательская обработка. Исходный файл не изменяется и хранится отдельно.",
     }
+    estimated = (bright or {}).get("estimated")
+    if estimated:
+        log["approximate"] = True
+        log["note"] = f"{estimated['note']} {log['note']}"
+    return log
 
 
 @dataclass
@@ -129,9 +134,12 @@ class CorrectionService:
         dark: Optional[np.ndarray],
         settings: CorrectionSettings,
         key: Optional[tuple] = None,
+        estimated: bool = False,
     ) -> Dict:
         small = image_io.resize_max(raw, PREVIEW_MAX_SIDE)
-        small_profile, heatmap, warnings = self._preview_profile(key, raw, small.shape, bright, dark, settings)
+        small_profile, heatmap, warnings = self._preview_profile(
+            key, raw, small.shape, bright, dark, settings, estimated
+        )
         result = self.correct(small, small_profile, settings, color.white_level(raw))
 
         # Один и тот же уровень белого для «до» и «после» — честное сравнение
@@ -149,7 +157,9 @@ class CorrectionService:
             "warnings": warnings,
         }
 
-    def _preview_profile(self, key, raw, small_shape, bright, dark, settings) -> Tuple[FlatProfile, str, List[str]]:
+    def _preview_profile(
+        self, key, raw, small_shape, bright, dark, settings, estimated=False
+    ) -> Tuple[FlatProfile, str, List[str]]:
         """
         Профиль, уже приведенный к размеру превью, карта освещенности и предупреждения.
         Зависят только от калибровки и размера снимка, поэтому кешируются: движение
@@ -172,7 +182,8 @@ class CorrectionService:
         entry = (
             small_profile,
             image_io.to_data_url(metrics.illumination_heatmap(profile.gain), "png"),
-            calibration_warnings(raw, bright, dark),
+            # Оценка хранится уменьшенной — о несовпадении размера предупреждать незачем
+            calibration_warnings(raw, None if estimated else bright, dark),
         )
         if cache_key is not None:
             with self._lock:

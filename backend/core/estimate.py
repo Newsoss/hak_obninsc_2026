@@ -1,0 +1,137 @@
+"""
+Оценка светлого поля, когда его не снимали (ретроспективная коррекция).
+
+- gaussian_flat: по одному снимку. Фон = сильно размытый снимок, из которого
+  исключены объекты препарата. Приблизительно: крупные объекты и плавные
+  перепады окраски могут частично попасть в «фон».
+- median_flat: по серии. В каждой точке кадра берется медиана по снимкам —
+  если на большинстве снимков в этой точке нет препарата, получается чистый
+  фон, то есть само освещение (виньетирование, пыль, оттенок лампы).
+"""
+from typing import List, Tuple
+
+import cv2
+import numpy as np
+
+from core.calibration import STRUCTURE_LIMIT, structure_fraction
+from core.flat_field import finite, to_luminance
+
+GAUSSIAN_SIDE = 768
+MEDIAN_SIDE = 512
+MIN_SERIES = 5
+RELIABLE_SERIES = 10
+MAX_SERIES = 64
+OBJECT_DEVIATION = 0.08  # отклонение от фона, после которого пиксель считается объектом
+# Размытие: 1/25 стороны кадра. Подобрано по отклонению от коррекции настоящим светлым полем:
+# сильнее размытие — не догоняет виньетирование в углах, слабее — «стирает» крупные клетки.
+GAUSSIAN_SIGMA_FRACTION = 1 / 25
+
+GAUSSIAN_NOTE = (
+    "Приблизительная коррекция: светлое поле не снималось, а оценено по самому снимку "
+    "размытием (псевдо flat-field). Крупные объекты и плавные перепады окраски могут "
+    "частично попасть в «фон». Для точной коррекции снимите светлое поле."
+)
+MEDIAN_NOTE = (
+    "Светлое поле не снималось, а оценено как медиана по {count} снимкам серии. "
+    "Оценка верна, если на каждом участке кадра в большинстве снимков нет препарата."
+)
+
+
+def _shrink(image: np.ndarray, side: int) -> np.ndarray:
+    img = finite(image)
+    h, w = img.shape[:2]
+    scale = min(1.0, side / max(h, w))
+    if scale < 1:
+        img = cv2.resize(img, (max(8, round(w * scale)), max(8, round(h * scale))), interpolation=cv2.INTER_AREA)
+    return img
+
+
+def gaussian_flat(image: np.ndarray) -> np.ndarray:
+    """Псевдо светлое поле по одному снимку (уменьшенное, float32)."""
+    small = _shrink(image, GAUSSIAN_SIDE)
+    sigma = max(small.shape[:2]) * GAUSSIAN_SIGMA_FRACTION
+    background = small
+    for _ in range(3):
+        blur = cv2.GaussianBlur(background, (0, 0), sigma)
+        # Объекты (темнее или светлее фона) заменяем текущей оценкой фона и размываем снова
+        ratio = to_luminance(small) / np.maximum(to_luminance(blur), 1e-6)
+        objects = np.abs(ratio - 1) > OBJECT_DEVIATION
+        if small.ndim == 3:
+            objects = objects[..., None]
+        background = np.where(objects, blur, small)
+    return cv2.GaussianBlur(background, (0, 0), sigma).astype(np.float32)
+
+
+def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
+    """Светлое поле как медиана серии. Возвращает (оценка, предупреждения)."""
+    if len(images) < MIN_SERIES:
+        raise ValueError(f"для оценки по серии нужно минимум {MIN_SERIES} снимков, загружено {len(images)}")
+    warnings: List[str] = []
+    if len(images) > MAX_SERIES:
+        # Равномерная выборка: медиане хватает, а память не раздувается
+        step = len(images) / MAX_SERIES
+        images = [images[int(i * step)] for i in range(MAX_SERIES)]
+
+    first = _shrink(images[0], MEDIAN_SIDE)
+    h, w = first.shape[:2]
+    color = first.ndim == 3
+    reference_aspect = images[0].shape[1] / images[0].shape[0]
+    stack = []
+    for img in images:
+        if abs(img.shape[1] / img.shape[0] - reference_aspect) > 0.01:
+            warnings.append("Снимки серии разного размера или формы кадра — приведены к первому.")
+        small = _shrink(img, MEDIAN_SIDE)
+        if small.shape[:2] != (h, w):
+            small = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
+        if color and small.ndim == 2:
+            small = np.repeat(small[..., None], 3, axis=2)
+        elif not color and small.ndim == 3:
+            small = to_luminance(small)
+        stack.append(small)
+
+    flat = np.median(np.stack(stack), axis=0).astype(np.float32)
+    flat = cv2.GaussianBlur(flat, (0, 0), 1.0)
+
+    count = len(stack)
+    if count < RELIABLE_SERIES:
+        warnings.append(f"Снимков всего {count} — оценка может быть шумной, лучше 10 и больше.")
+    if structure_fraction(flat) > STRUCTURE_LIMIT:
+        warnings.append(
+            "В оценке светлого поля видны детали препарата: объекты на разных снимках слишком часто "
+            "совпадают по положению. Добавьте снимки других полей зрения или снимите светлое поле."
+        )
+    return flat, list(dict.fromkeys(warnings))
+
+
+MAX_AVERAGE = 32
+
+
+def average_stack(images: List[np.ndarray]) -> np.ndarray:
+    """
+    Среднее нескольких кадров калибровки (master flat / master dark).
+    От 4 кадров в каждой точке отбрасываются минимум и максимум — так выбросы
+    (горячий пиксель, пылинка, космическая частица) не портят результат.
+    Считается полосами по строкам, результат во float32: усреднение дает дробную
+    точность, которую нельзя терять округлением.
+    """
+    if len(images) < 2:
+        raise ValueError("для усреднения нужно минимум 2 кадра")
+    if len(images) > MAX_AVERAGE:
+        raise ValueError(f"для усреднения достаточно {MAX_AVERAGE} кадров, загружено {len(images)}")
+    shape = images[0].shape
+    for img in images[1:]:
+        if img.shape != shape:
+            raise ValueError(
+                f"кадры разного размера: {shape[1]}×{shape[0]} и {img.shape[1]}×{img.shape[0]} — "
+                "усредняются только кадры с одной камеры и одними настройками"
+            )
+    trim = len(images) >= 4
+    out = np.empty(shape, np.float32)
+    rows = max(1, 4_000_000 // (int(np.prod(shape[1:])) * len(images)))
+    for y in range(0, shape[0], rows):
+        strip = np.stack([finite(img[y : y + rows]) for img in images])
+        if trim:
+            strip.sort(axis=0)
+            strip = strip[1:-1]
+        out[y : y + rows] = strip.mean(axis=0)
+    return out

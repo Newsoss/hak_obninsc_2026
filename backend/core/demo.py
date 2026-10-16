@@ -16,7 +16,7 @@ import numpy as np
 WIDTH, HEIGHT = 1280, 960
 BRIGHT_LEVEL = 225.0
 ILLUMINANT_TINT = np.array([1.0, 0.92, 0.76], dtype=np.float32)
-SAMPLE_COUNT = 4
+SAMPLE_COUNT = 8
 
 
 @lru_cache(maxsize=1)
@@ -125,6 +125,26 @@ def sample_from_image(image: np.ndarray, seed: int = 1) -> np.ndarray:
     """Снимок препарата с искусственной засветкой — пара к generate('bright'/'dark')."""
     light = BRIGHT_LEVEL * _optics() * specimen_from_image(image)
     return _to_u8(_dark(np.random.default_rng(11)) + light, np.random.default_rng(200 + seed))
+
+
+def builtin_specimen(seed: int = 1) -> np.ndarray:
+    """Встроенный препарат (пропускание 0..1) для проверки метода."""
+    return _specimen(seed)
+
+
+def simulate(transmittance: np.ndarray, seed: int = 1) -> Dict[str, np.ndarray]:
+    """
+    Съемка известного препарата через «плохую» оптику: снимок, светлое поле и
+    темновой кадр (8 бит, с шумом), а также эталон — каким должен получиться
+    идеально исправленный снимок: T × m, где m — средняя яркость светлого поля.
+    """
+    light = BRIGHT_LEVEL * _optics()
+    return {
+        "raw": _to_u8(_dark(np.random.default_rng(11)) + light * transmittance, np.random.default_rng(500 + seed)),
+        "bright": generate("bright"),
+        "dark": generate("dark"),
+        "truth": (transmittance * float(light.mean())).astype(np.float32),
+    }
 
 
 @lru_cache(maxsize=8)

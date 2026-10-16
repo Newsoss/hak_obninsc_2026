@@ -2,20 +2,26 @@ import { useRef, useState } from 'react';
 import { ACCEPT, frameMeta, isImageFile } from '../lib/files';
 import { Spinner } from './ui';
 
-export default function FrameSlot({ title, frame, busy, optional, onFile, onClear }) {
+/**
+ * Слот для кадра. multiple — можно выбрать несколько файлов сразу (для калибровки:
+ * сервер их усреднит); тогда onFile получает массив, иначе — один файл.
+ */
+export default function FrameSlot({ title, frame, busy, optional, multiple, emptyText, onFile, onClear }) {
   const input = useRef(null);
   const [over, setOver] = useState(false);
 
-  const pick = (files) => {
-    const file = Array.from(files || []).find(isImageFile);
-    if (file) onFile(file);
+  const pick = (fileList) => {
+    const files = Array.from(fileList || []).filter(isImageFile);
+    if (!files.length) return;
+    onFile(multiple && files.length > 1 ? files : files[0]);
   };
 
-  const description = frame
-    ? `${frame.name}, ${frameMeta(frame)}${frame.metadata?.pixel_size ? `, ${frame.metadata.pixel_size}/пикс` : ''}`
-    : optional
-      ? 'Необязательно. Перетащите или нажмите'
-      : 'Перетащите файл или нажмите';
+  let description = emptyText || (optional ? 'Необязательно. Перетащите или нажмите' : 'Перетащите файл или нажмите');
+  if (frame?.estimated) description = `${frame.name} — приблизительно`;
+  else if (frame?.averaged)
+    description = `${frame.name}${frame.averaged.noise_reduction ? `, шум ниже в ${frame.averaged.noise_reduction}×` : ''}`;
+  else if (frame)
+    description = `${frame.name}, ${frameMeta(frame)}${frame.metadata?.pixel_size ? `, ${frame.metadata.pixel_size}/пикс` : ''}`;
 
   return (
     <div>
@@ -38,7 +44,17 @@ export default function FrameSlot({ title, frame, busy, optional, onFile, onClea
           over ? 'border-accent bg-accent-soft' : frame?.checks?.length ? 'border-warn/60' : 'border-line hover:bg-raised'
         }`}
       >
-        <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => pick(e.target.files)} />
+        <input
+          ref={input}
+          type="file"
+          accept={ACCEPT}
+          multiple={multiple}
+          hidden
+          onChange={(e) => {
+            pick(e.target.files);
+            e.target.value = '';
+          }}
+        />
 
         <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded border border-line bg-raised">
           {frame && <img src={frame.thumbnail} alt="" className="h-full w-full object-cover" />}
@@ -51,7 +67,16 @@ export default function FrameSlot({ title, frame, busy, optional, onFile, onClea
 
         <div className="min-w-0 flex-1">
           <div className="text-sm">{title}</div>
-          <div className="truncate text-xs text-muted" title={frame?.name}>
+          <div
+            className="truncate text-xs text-muted"
+            title={
+              frame?.averaged
+                ? frame.averaged.files.join(', ')
+                : multiple && !frame
+                  ? 'Можно выбрать несколько кадров — они будут усреднены'
+                  : frame?.name
+            }
+          >
             {description}
           </div>
         </div>
