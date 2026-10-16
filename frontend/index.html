@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Чистый микроснимок — Коррекция артефактов</title>
+    <!-- Tailwind CSS для быстрой и красивой верстки -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col">
+
+    <!-- Шапка -->
+    <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center shadow-md">
+        <div>
+            <h1 class="text-xl font-bold tracking-wide text-blue-400">🔬 CleanMicroscope AI</h1>
+            <p class="text-xs text-slate-400">Коррекция артефактов лабораторных изображений (Flat-field correction)</p>
+        </div>
+        <div class="flex space-x-2 bg-slate-900 p-1 rounded-lg border border-slate-700">
+            <button id="tabSingle" onclick="switchTab('single')" class="px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition">Одиночный кадр</button>
+            <button id="tabBatch" onclick="switchTab('batch')" class="px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition">Пакетная обработка (3+)</button>
+        </div>
+    </header>
+
+    <!-- Основное содержимое -->
+    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-4 gap-6 max-w-7xl mx-auto w-full">
+        
+        <!-- Левая панель параметров и загрузки -->
+        <section class="lg:col-span-1 bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col justify-between shadow-lg">
+            <div class="space-y-5">
+                <h2 class="text-md font-semibold text-slate-200 border-b border-slate-700 pb-2">Параметры и файлы</h2>
+                
+                <!-- Загрузка Raw -->
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Исходный снимок (Raw)</label>
+                    <input type="file" id="rawFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
+                </div>
+
+                <!-- Загрузка Bright-field -->
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Светлое поле (Bright-field)</label>
+                    <input type="file" id="brightFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer">
+                </div>
+
+                <!-- Дополнительный темный кадр (опционально) -->
+                <div>
+                    <label class="block text-xs font-medium text-slate-400 mb-1">Темный кадр (Dark-field, опц.)</label>
+                    <input type="file" id="darkFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer">
+                </div>
+
+                <div class="pt-4 border-t border-slate-700 space-y-3">
+                    <label class="block text-xs font-medium text-slate-400">Тонкая настройка</label>
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1"><span>Яркость</span><span id="brightVal">0</span></div>
+                        <input type="range" min="-50" max="50" value="0" class="w-full accent-blue-500" oninput="document.getElementById('brightVal').innerText = this.value">
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="processImage()" class="mt-6 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition shadow-md text-sm">
+                Запустить коррекцию ⚡
+            </button>
+        </section>
+
+        <!-- Центральная область визуализации -->
+        <section class="lg:col-span-3 bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col shadow-lg">
+            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+                <h2 class="text-md font-semibold text-slate-200">Сравнение результата (До / После)</h2>
+                <span id="processTime" class="text-xs text-emerald-400 hidden">Время обработки: 0.14 сек</span>
+            </div>
+
+            <!-- Зона вывода сравнения картинок -->
+            <div id="singleView" class="flex-1 flex items-center justify-center bg-slate-950 rounded-lg border border-slate-800 relative overflow-hidden min-h-[400px]">
+                <div class="text-center text-slate-500">
+                    <svg class="mx-auto h-12 w-12 text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <p class="text-sm">Загрузите файлы и нажмите «Запустить коррекцию»</p>
+                </div>
+            </div>
+
+            <!-- Зона пакетной обработки (скрыта по умолчанию) -->
+            <div id="batchView" class="flex-1 hidden flex-col justify-between">
+                <div class="grid grid-cols-3 gap-4 mb-4">
+                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
+                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 1.png</div>
+                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
+                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 2.png</div>
+                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
+                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 3.png</div>
+                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
+                    </div>
+                </div>
+                <button class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition text-sm">
+                    Скачать архивом (ZIP)
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Скрипт переключения вкладок -->
+    <script>
+        function switchTab(tab) {
+            const singleV = document.getElementById('singleView');
+            const batchV = document.getElementById('batchView');
+            const tabS = document.getElementById('tabSingle');
+            const tabB = document.getElementById('tabBatch');
+
+            if (tab === 'single') {
+                singleV.classList.remove('hidden');
+                batchV.classList.add('hidden');
+                tabS.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition";
+                tabB.className = "px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition";
+            } else {
+                singleV.classList.add('hidden');
+                batchV.classList.remove('hidden');
+                tabB.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition";
+                tabS.className = "px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition";
+            }
+        }
+
+        function processImage() {
+            // Демо-симуляция обработки
+            const timeTag = document.getElementById('processTime');
+            timeTag.classList.remove('hidden');
+            timeTag.innerText = "Время обработки: " + (Math.random() * 0.1 + 0.08).toFixed(2) + " сек";
+            
+            const view = document.getElementById('singleView');
+            view.innerHTML = `
+                <div class="relative w-full h-full flex items-center justify-center text-slate-400">
+                    <div class="absolute inset-2 bg-gradient-to-r from-blue-900/40 to-emerald-900/40 rounded border border-emerald-500/30 flex items-center justify-center">
+                        <span class="bg-slate-900/80 px-3 py-1 rounded text-xs text-emerald-300 font-mono">Скорректированный кадр (Flat-field применен)</span>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
