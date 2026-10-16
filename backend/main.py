@@ -1,27 +1,29 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.process import router as process_router
+from fastapi.staticfiles import StaticFiles
+
+from api.routes import router
 
 app = FastAPI(
     title="MicroCleaner API",
-    description="Сервис высокоточной коррекции артефактов микроскопии (Flat-Field Correction)",
-    version="1.0.0"
+    description="Коррекция неравномерного освещения микроснимков методом flat-field correction",
+    version="2.0.0",
 )
 
-# Разрешаем CORS (чтобы React на порту 3000 и Ngrok работали без блокировок)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "X-Correction-Report"],
 )
 
-# Подключаем роутер
-app.include_router(process_router, prefix="/api")
+app.include_router(router, prefix="/api")
 
-
-@app.get("/health", tags=["System"])
-def health_check():
-    """Проверка доступности сервиса."""
-    return {"status": "ok", "service": "MicroCleaner API v1.0"}
+# Собранный фронтенд (npm run build) раздается тем же сервером — один процесс на всё
+STATIC_DIR = Path(os.getenv("STATIC_DIR", Path(__file__).parent.parent / "frontend" / "dist"))
+if STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")

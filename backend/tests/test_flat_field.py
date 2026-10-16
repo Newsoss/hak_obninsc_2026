@@ -1,0 +1,119 @@
+import numpy as np
+import pytest
+
+from core import color, demo, metrics
+from core.flat_field import apply_profile, build_profile, flat_field_correct, match_geometry
+
+
+def vignette(h=120, w=160, strength=0.6):
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r2 = ((xx - w / 2) ** 2 + (yy - h / 2) ** 2) / (w / 2) ** 2
+    return 1.0 - strength * r2 / r2.max()
+
+
+def test_uniform_specimen_becomes_flat():
+    light = vignette()
+    bright = (200 * light).astype(np.float32)
+    raw = (100 * light).astype(np.float32)
+    corrected = flat_field_correct(raw, bright)
+    assert corrected.std() / corrected.mean() < 1e-4
+
+
+def test_preserves_exposure_level():
+    light = vignette()
+    bright = 200 * light
+    corrected = apply_profile(bright, build_profile(bright))
+    assert corrected.mean() == pytest.approx(bright.mean(), rel=1e-4)
+
+
+def test_dark_frame_is_subtracted():
+    light = vignette()
+    dark = np.full_like(light, 20.0)
+    bright = dark + 200 * light
+    raw = dark + 100 * light
+    corrected = flat_field_correct(raw, bright, dark)
+    assert corrected.std() < 1e-3
+    # (R - D) / (F - D) = 0.5, m = mean(F - D) = 200 * mean(light)
+    assert corrected.mean() == pytest.approx(100 * light.mean(), rel=1e-3)
+
+
+def test_zero_bright_field_does_not_explode():
+    bright = np.full((10, 10), 100, np.uint8)
+    bright[0, 0] = 0
+    raw = np.full((10, 10), 50, np.uint8)
+    corrected = flat_field_correct(raw, bright)
+    assert np.isfinite(corrected).all()
+    assert corrected.dtype == np.uint8
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16, np.float32])
+def test_dtype_is_preserved(dtype):
+    light = vignette()
+    scale = {np.uint8: 200, np.uint16: 50000, np.float32: 0.8}[dtype]
+    bright = (scale * light).astype(dtype)
+    raw = (scale * 0.5 * light).astype(dtype)
+    assert flat_field_correct(raw, bright).dtype == dtype
+
+
+def test_sixteen_bit_range_is_not_clipped_to_8_bit():
+    light = vignette()
+    bright = (40000 * light).astype(np.uint16)
+    corrected = flat_field_correct(bright, bright)
+    assert corrected.max() > 255
+
+
+def test_neutralize_removes_color_cast():
+    light = vignette()[..., None] * np.array([1.0, 0.9, 0.7], np.float32)
+    bright = 220 * light
+    neutral = flat_field_correct(bright, bright, neutralize_color=True)
+    tinted = flat_field_correct(bright, bright, neutralize_color=False)
+    assert np.ptp(neutral.reshape(-1, 3).mean(0)) < 1e-3
+    assert np.ptp(tinted.reshape(-1, 3).mean(0)) > 10
+
+
+def test_calibration_geometry_is_matched():
+    assert match_geometry(np.ones((60, 80), np.float32), (120, 160, 3)).shape == (120, 160, 3)
+    assert match_geometry(np.ones((120, 160, 3), np.float32), (120, 160)).shape == (120, 160)
+
+
+def test_metrics_show_improvement_on_demo():
+    raw, bright, dark = demo.generate("sample-1"), demo.generate("bright"), demo.generate("dark")
+    corrected = flat_field_correct(raw, bright, dark)
+    before, after = metrics.uniformity(raw), metrics.uniformity(corrected)
+    assert after["nonuniformity"] < before["nonuniformity"] / 3
+    assert abs(after["vignetting"] - 100) < abs(before["vignetting"] - 100)
+
+
+def test_white_level_detects_effective_bit_depth():
+    assert color.white_level(np.array([0, 4000], np.uint16)) == 4095
+    assert color.white_level(np.array([0, 200], np.uint8)) == 255
+
+
+def test_color_identity_and_clipping():
+    x = np.random.default_rng(0).random((8, 8, 3)).astype(np.float32)
+    assert np.allclose(color.apply_color(x), x)
+    out = color.apply_color(x, exposure=2, contrast=2, saturation=2)
+    assert out.min() >= 0 and out.max() <= 1
+
+
+def test_nan_and_inf_are_sanitized():
+    bright = vignette().astype(np.float32)
+    bright[0, 0], bright[1, 1] = np.nan, np.inf
+    raw = 0.5 * bright
+    raw[2, 2] = -np.inf
+    corrected = flat_field_correct(raw, bright)
+    assert np.isfinite(corrected).all()
+
+
+def test_result_is_reproducible():
+    raw, bright, dark = demo.generate("sample-3"), demo.generate("bright"), demo.generate("dark")
+    first = flat_field_correct(raw, bright, dark)
+    second = flat_field_correct(raw.copy(), bright.copy(), dark.copy())
+    assert np.array_equal(first, second)
+
+
+def test_source_pixels_are_not_modified():
+    raw, bright = demo.generate("sample-1"), demo.generate("bright")
+    snapshot = raw.copy()
+    flat_field_correct(raw, bright)
+    assert np.array_equal(raw, snapshot)
