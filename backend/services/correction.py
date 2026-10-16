@@ -13,7 +13,7 @@ import numpy as np
 
 from adapters import image_io
 from core import color, metrics
-from core.flat_field import FlatProfile, apply_profile, build_profile, to_dtype
+from core.flat_field import FlatProfile, apply_profile, build_profile, match_geometry, to_dtype
 from schemas.processing import CorrectionSettings
 
 PREVIEW_MAX_SIDE = 1600
@@ -69,6 +69,7 @@ def calibration_warnings(raw: np.ndarray, bright: np.ndarray, dark: Optional[np.
 class CorrectionService:
     def __init__(self, profile_cache_size: int = 16):
         self._profiles: "OrderedDict[tuple, FlatProfile]" = OrderedDict()
+        self._previews: "OrderedDict[tuple, tuple]" = OrderedDict()
         self._cache_size = profile_cache_size
         self._lock = threading.Lock()
 
@@ -118,9 +119,9 @@ class CorrectionService:
         settings: CorrectionSettings,
         key: Optional[tuple] = None,
     ) -> Dict:
-        profile = self.profile(key, bright, dark, settings)
         small = image_io.resize_max(raw, PREVIEW_MAX_SIDE)
-        result = self.correct(small, profile, settings)
+        small_profile, heatmap, warnings = self._preview_profile(key, raw, small.shape, bright, dark, settings)
+        result = self.correct(small, small_profile, settings)
 
         # Один и тот же уровень белого для «до» и «после» — честное сравнение
         before_u8 = image_io.to_display_u8(small, result.white)
@@ -128,15 +129,46 @@ class CorrectionService:
         return {
             "before": image_io.to_data_url(before_u8),
             "after": image_io.to_data_url(after_u8),
-            "illumination_map": image_io.to_data_url(metrics.illumination_heatmap(profile.gain), "png"),
+            "illumination_map": heatmap,
             "width": raw.shape[1],
             "height": raw.shape[0],
             "dtype": str(raw.dtype),
             "elapsed_ms": round(result.elapsed_ms, 2),
             "metrics": {"before": metrics.uniformity(small), "after": metrics.uniformity(result.image)},
-            "histograms": {"before": metrics.histogram(before_u8), "after": metrics.histogram(after_u8)},
-            "warnings": calibration_warnings(raw, bright, dark),
+            "warnings": warnings,
         }
+
+    def _preview_profile(self, key, raw, small_shape, bright, dark, settings) -> Tuple[FlatProfile, str, List[str]]:
+        """
+        Профиль, уже приведенный к размеру превью, карта освещенности и предупреждения.
+        Зависят только от калибровки и размера снимка, поэтому кешируются: движение
+        ползунков цветокоррекции не пересчитывает их на многомегапиксельных TIFF.
+        """
+        cache_key = None if key is None else (
+            *key, settings.smoothing, settings.neutralize_color, raw.shape, small_shape
+        )
+        if cache_key is not None:
+            with self._lock:
+                if cache_key in self._previews:
+                    self._previews.move_to_end(cache_key)
+                    return self._previews[cache_key]
+
+        profile = self.profile(key, bright, dark, settings)
+        small_profile = FlatProfile(
+            gain=match_geometry(profile.gain, small_shape),
+            dark=None if profile.dark is None else match_geometry(profile.dark, small_shape),
+        )
+        entry = (
+            small_profile,
+            image_io.to_data_url(metrics.illumination_heatmap(profile.gain), "png"),
+            calibration_warnings(raw, bright, dark),
+        )
+        if cache_key is not None:
+            with self._lock:
+                self._previews[cache_key] = entry
+                while len(self._previews) > self._cache_size:
+                    self._previews.popitem(last=False)
+        return entry
 
     def export(
         self,

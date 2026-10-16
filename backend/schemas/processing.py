@@ -62,7 +62,6 @@ class PreviewResponse(BaseModel):
     dtype: str
     elapsed_ms: float
     metrics: Dict[str, Uniformity]
-    histograms: Dict[str, Dict[str, List[int]]]
     warnings: List[str] = []
 
 

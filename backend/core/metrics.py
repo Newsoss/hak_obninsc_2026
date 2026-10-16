@@ -1,5 +1,5 @@
 """Объективные метрики качества освещения и гистограммы."""
-from typing import Dict, List
+from typing import Dict
 
 import cv2
 import numpy as np
@@ -47,18 +47,6 @@ def uniformity(image: np.ndarray) -> Dict[str, float]:
     return {
         "nonuniformity": round(float(field.std()) / mean * 100, 2),
         "vignetting": round(float(corners.mean()) / max(float(center.mean()), 1e-6) * 100, 1),
-    }
-
-
-def histogram(image_u8: np.ndarray, bins: int = 128) -> Dict[str, List[int]]:
-    """Гистограмма 8-битного превью по каналам (r/g/b или l)."""
-    if image_u8.ndim == 2:
-        channels = {"l": image_u8}
-    else:
-        channels = {name: image_u8[..., i] for i, name in enumerate("rgb")}
-    return {
-        name: np.bincount((ch.ravel() >> (8 - int(np.log2(bins)))), minlength=bins).tolist()
-        for name, ch in channels.items()
     }
 
 

@@ -41,7 +41,7 @@ def test_preview_improves_uniformity(demo_ids):
     body = response.json()
     assert body["after"].startswith("data:image/jpeg;base64,")
     assert body["metrics"]["after"]["nonuniformity"] < body["metrics"]["before"]["nonuniformity"]
-    assert set(body["histograms"]["after"]) == {"r", "g", "b"}
+    assert body["illumination_map"].startswith("data:image/png;base64,")
 
 
 def test_export_keeps_format(demo_ids):
