@@ -1,143 +1,841 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Чистый микроснимок — Коррекция артефактов</title>
-    <!-- Tailwind CSS для быстрой и красивой верстки -->
-    <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CleanMicroscope AI - Коррекция артефактов</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  
+  <!-- Babel compiler for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Светлый технологичный градиентный фон */
+    .bg-lab-mesh {
+      background-color: #f8fafc;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.07) 0px, transparent 50%),
+        radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.06) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(56, 189, 248, 0.08) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(226, 232, 240, 0.8);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+    .glass-panel-subtle {
+      background: rgba(241, 245, 249, 0.7);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(226, 232, 240, 0.6);
+    }
+    /* Пользовательские скроллбары */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .slider-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 2px;
+      height: 16px;
+      background: #0284c7;
+      box-shadow: -4px 0 0 #0284c7, 4px 0 0 #0284c7;
+    }
+  </style>
 </head>
-<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col">
+<body class="overflow-x-hidden antialiased selection:bg-cyan-500 selection:text-white bg-lab-mesh min-h-screen">
+  <div id="root"></div>
 
-    <!-- Шапка -->
-    <header class="bg-slate-800 border-b border-slate-700 px-6 py-4 flex justify-between items-center shadow-md">
-        <div>
-            <h1 class="text-xl font-bold tracking-wide text-blue-400">🔬 CleanMicroscope AI</h1>
-            <p class="text-xs text-slate-400">Коррекция артефактов лабораторных изображений (Flat-field correction)</p>
-        </div>
-        <div class="flex space-x-2 bg-slate-900 p-1 rounded-lg border border-slate-700">
-            <button id="tabSingle" onclick="switchTab('single')" class="px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition">Одиночный кадр</button>
-            <button id="tabBatch" onclick="switchTab('batch')" class="px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition">Пакетная обработка (3+)</button>
-        </div>
-    </header>
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
-    <!-- Основное содержимое -->
-    <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-4 gap-6 max-w-7xl mx-auto w-full">
+    const Icon = ({ name, className = "w-4 h-4" }) => {
+      const ref = useRef(null);
+      useEffect(() => {
+        if (window.lucide && ref.current) {
+          ref.current.innerHTML = `<i data-lucide="${name}" class="${className}"></i>`;
+          window.lucide.createIcons({
+            attrs: { class: className },
+            nameAttr: 'data-lucide'
+          });
+        }
+      }, [name, className]);
+      return <span ref={ref} className="inline-flex items-center justify-center"></span>;
+    };
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('single'); // 'single' | 'batch' | 'docs'
+      const [preset, setPreset] = useState('brightfield');
+      
+      const [rawImg, setRawImg] = useState(null);
+      const [brightImg, setBrightImg] = useState(null);
+      const [darkImg, setDarkImg] = useState(null);
+      
+      const [processedUrl, setProcessedUrl] = useState(null);
+      const [processingTime, setProcessingTime] = useState(null);
+      const [isProcessing, setIsProcessing] = useState(false);
+
+      const [splitPos, setSplitPos] = useState(50);
+      const [zoom, setZoom] = useState(1);
+      const [brightness, setBrightness] = useState(0);
+      const [contrast, setContrast] = useState(100);
+      const [gamma, setGamma] = useState(1.0);
+
+      const [batchFiles, setBatchFiles] = useState([]);
+      const [batchProgress, setBatchProgress] = useState(0);
+      const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+
+      const histogramCanvasRef = useRef(null);
+
+      useEffect(() => {
+        generateSyntheticSample();
+      }, []);
+
+      useEffect(() => {
+        if (rawImg && brightImg) {
+          runFlatFieldCorrection();
+        }
+      }, [rawImg, brightImg, darkImg, brightness, contrast, gamma]);
+
+      const generateSyntheticSample = () => {
+        const width = 600;
+        const height = 450;
+
+        const brightCanvas = document.createElement('canvas');
+        brightCanvas.width = width;
+        brightCanvas.height = height;
+        const bCtx = brightCanvas.getContext('2d');
+        const bData = bCtx.createImageData(width, height);
         
-        <!-- Левая панель параметров и загрузки -->
-        <section class="lg:col-span-1 bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col justify-between shadow-lg">
-            <div class="space-y-5">
-                <h2 class="text-md font-semibold text-slate-200 border-b border-slate-700 pb-2">Параметры и файлы</h2>
-                
-                <!-- Загрузка Raw -->
-                <div>
-                    <label class="block text-xs font-medium text-slate-400 mb-1">Исходный снимок (Raw)</label>
-                    <input type="file" id="rawFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
-                </div>
-
-                
-                <div>
-                    <label class="block text-xs font-medium text-slate-400 mb-1">Светлое поле (Bright-field)</label>
-                    <input type="file" id="brightFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer">
-                </div>
-
-                <!-- Дополнительный темный кадр (опционально) -->
-                <div>
-                    <label class="block text-xs font-medium text-slate-400 mb-1">Темный кадр (Dark-field, опц.)</label>
-                    <input type="file" id="darkFile" class="w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer">
-                </div>
-
-                <div class="pt-4 border-t border-slate-700 space-y-3">
-                    <label class="block text-xs font-medium text-slate-400">Тонкая настройка</label>
-                    <div>
-                        <div class="flex justify-between text-xs text-slate-400 mb-1"><span>Яркость</span><span id="brightVal">0</span></div>
-                        <input type="range" min="-50" max="50" value="0" class="w-full accent-blue-500" oninput="document.getElementById('brightVal').innerText = this.value">
-                    </div>
-                </div>
-            </div>
-
-            <button onclick="processImage()" class="mt-6 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition shadow-md text-sm">
-                Запустить коррекцию ⚡
-            </button>
-        </section>
-
-        <!-- Центральная область визуализации -->
-        <section class="lg:col-span-3 bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col shadow-lg">
-            <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-                <h2 class="text-md font-semibold text-slate-200">Сравнение результата (До / После)</h2>
-                <span id="processTime" class="text-xs text-emerald-400 hidden">Время обработки: 0.14 сек</span>
-            </div>
-
-            <!-- Зона вывода сравнения картинок -->
-            <div id="singleView" class="flex-1 flex items-center justify-center bg-slate-950 rounded-lg border border-slate-800 relative overflow-hidden min-h-[400px]">
-                <div class="text-center text-slate-500">
-                    <svg class="mx-auto h-12 w-12 text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                    </svg>
-                    <p class="text-sm">Загрузите файлы и нажмите «Запустить коррекцию»</p>
-                </div>
-            </div>
-
-            <!-- Зона пакетной обработки (скрыта по умолчанию) -->
-            <div id="batchView" class="flex-1 hidden flex-col justify-between">
-                <div class="grid grid-cols-3 gap-4 mb-4">
-                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
-                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 1.png</div>
-                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
-                    </div>
-                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
-                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 2.png</div>
-                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
-                    </div>
-                    <div class="bg-slate-900 border border-slate-800 p-3 rounded-lg text-center">
-                        <div class="h-28 bg-slate-800 rounded mb-2 flex items-center justify-center text-xs text-slate-500">Снимок 3.png</div>
-                        <span class="text-xs text-emerald-400 font-medium">✓ Обработано</span>
-                    </div>
-                </div>
-                <button class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg transition text-sm">
-                    Скачать архивом (ZIP)
-                </button>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- Скрипт переключения вкладок -->
-    <script>
-        function switchTab(tab) {
-            const singleV = document.getElementById('singleView');
-            const batchV = document.getElementById('batchView');
-            const tabS = document.getElementById('tabSingle');
-            const tabB = document.getElementById('tabBatch');
-
-            if (tab === 'single') {
-                singleV.classList.remove('hidden');
-                batchV.classList.add('hidden');
-                tabS.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition";
-                tabB.className = "px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition";
-            } else {
-                singleV.classList.add('hidden');
-                batchV.classList.remove('hidden');
-                tabB.className = "px-4 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white transition";
-                tabS.className = "px-4 py-1.5 text-sm font-medium rounded-md text-slate-400 hover:text-white transition";
-            }
-        }
-
-        function processImage() {
-            // Демо-симуляция обработки
-            const timeTag = document.getElementById('processTime');
-            timeTag.classList.remove('hidden');
-            timeTag.innerText = "Время обработки: " + (Math.random() * 0.1 + 0.08).toFixed(2) + " сек";
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const idx = (y * width + x) * 4;
+            const dx = (x - width / 2) / (width / 2);
+            const dy = (y - height / 2) / (height / 2);
+            const dist = Math.sqrt(dx * dx + dy * dy);
             
-            const view = document.getElementById('singleView');
-            view.innerHTML = `
-                <div class="relative w-full h-full flex items-center justify-center text-slate-400">
-                    <div class="absolute inset-2 bg-gradient-to-r from-blue-900/40 to-emerald-900/40 rounded border border-emerald-500/30 flex items-center justify-center">
-                        <span class="bg-slate-900/80 px-3 py-1 rounded text-xs text-emerald-300 font-mono">Скорректированный кадр (Flat-field применен)</span>
-                    </div>
-                </div>
-            `;
+            let factor = 1 - dist * 0.45;
+            const grad = 1 - ((x / width) * 0.15 + (y / height) * 0.15);
+            factor = Math.max(0.1, factor * grad);
+
+            bData.data[idx] = Math.min(255, 235 * factor);
+            bData.data[idx + 1] = Math.min(255, 230 * factor);
+            bData.data[idx + 2] = Math.min(255, 215 * factor);
+            bData.data[idx + 3] = 255;
+          }
         }
-    </script>
+        bCtx.putImageData(bData, 0, 0);
+        setBrightImg(brightCanvas.toDataURL());
+
+        const darkCanvas = document.createElement('canvas');
+        darkCanvas.width = width;
+        darkCanvas.height = height;
+        const dCtx = darkCanvas.getContext('2d');
+        const dData = dCtx.createImageData(width, height);
+        for (let i = 0; i < dData.data.length; i += 4) {
+          const noise = Math.random() * 12;
+          dData.data[i] = noise;
+          dData.data[i + 1] = noise * 0.9;
+          dData.data[i + 2] = noise * 1.1;
+          dData.data[i + 3] = 255;
+        }
+        dCtx.putImageData(dData, 0, 0);
+        setDarkImg(darkCanvas.toDataURL());
+
+        const rawCanvas = document.createElement('canvas');
+        rawCanvas.width = width;
+        rawCanvas.height = height;
+        const rCtx = rawCanvas.getContext('2d');
+        
+        rCtx.drawImage(brightCanvas, 0, 0);
+
+        const cellColors = ['rgba(140, 50, 160, 0.75)', 'rgba(50, 120, 180, 0.7)', 'rgba(40, 160, 100, 0.8)'];
+        for (let i = 0; i < 45; i++) {
+          const cx = Math.random() * width;
+          const cy = Math.random() * height;
+          const radius = 6 + Math.random() * 22;
+          
+          rCtx.beginPath();
+          rCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+          rCtx.fillStyle = cellColors[i % cellColors.length];
+          rCtx.fill();
+
+          rCtx.beginPath();
+          rCtx.arc(cx - radius * 0.2, cy - radius * 0.2, radius * 0.35, 0, Math.PI * 2);
+          rCtx.fillStyle = 'rgba(25, 20, 60, 0.85)';
+          rCtx.fill();
+        }
+
+        rCtx.beginPath();
+        rCtx.arc(width * 0.35, height * 0.4, 18, 0, Math.PI * 2);
+        rCtx.fillStyle = 'rgba(40, 40, 40, 0.4)';
+        rCtx.fill();
+
+        setRawImg(rawCanvas.toDataURL());
+      };
+
+      const runFlatFieldCorrection = async () => {
+        if (!rawImg || !brightImg) return;
+        setIsProcessing(true);
+        const startTime = performance.now();
+
+        const imgRaw = new Image();
+        const imgBright = new Image();
+        const imgDark = new Image();
+
+        imgRaw.src = rawImg;
+        imgBright.src = brightImg;
+        if (darkImg) imgDark.src = darkImg;
+
+        await Promise.all([
+          new Promise(r => imgRaw.onload = r),
+          new Promise(r => imgBright.onload = r),
+          darkImg ? new Promise(r => imgDark.onload = r) : Promise.resolve()
+        ]);
+
+        const width = imgRaw.width;
+        const height = imgRaw.height;
+
+        const getPixels = (img) => {
+          const cvs = document.createElement('canvas');
+          cvs.width = width;
+          cvs.height = height;
+          const ctx = cvs.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          return ctx.getImageData(0, 0, width, height);
+        };
+
+        const rawData = getPixels(imgRaw);
+        const brightData = getPixels(imgBright);
+        const darkData = darkImg ? getPixels(imgDark) : null;
+
+        const outCanvas = document.createElement('canvas');
+        outCanvas.width = width;
+        outCanvas.height = height;
+        const outCtx = outCanvas.getContext('2d');
+        const outData = outCtx.createImageData(width, height);
+
+        let brightSum = 0;
+        let pixelCount = 0;
+        for (let i = 0; i < brightData.data.length; i += 4) {
+          const darkVal = darkData ? darkData.data[i] : 0;
+          const bVal = Math.max(1, brightData.data[i] - darkVal);
+          brightSum += bVal;
+          pixelCount++;
+        }
+        const meanBright = brightSum / pixelCount;
+
+        const r = rawData.data;
+        const b = brightData.data;
+        const d = darkData ? darkData.data : null;
+        const o = outData.data;
+
+        const contrastFactor = (255 * (contrast + 255)) / (255 * (255 - contrast));
+        const gammaCorrection = 1 / gamma;
+
+        for (let i = 0; i < r.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            const rawVal = r[i + c];
+            const darkVal = d ? d[i + c] : 0;
+            const brightVal = b[i + c];
+
+            const denominator = Math.max(1.0, brightVal - darkVal);
+            const numerator = Math.max(0.0, rawVal - darkVal);
+            
+            let corrected = (numerator / denominator) * meanBright;
+
+            corrected += brightness;
+            if (gamma !== 1.0) {
+              corrected = 255 * Math.pow(Math.max(0, corrected) / 255, gammaCorrection);
+            }
+            
+            if (contrast !== 0) {
+              corrected = contrastFactor * (corrected - 128) + 128;
+            }
+
+            o[i + c] = Math.min(255, Math.max(0, corrected));
+          }
+          o[i + 3] = 255;
+        }
+
+        outCtx.putImageData(outData, 0, 0);
+        setProcessedUrl(outCanvas.toDataURL());
+        
+        const endTime = performance.now();
+        setProcessingTime((endTime - startTime).toFixed(1));
+        setIsProcessing(false);
+
+        renderHistogram(outData);
+      };
+
+      const renderHistogram = (imgData) => {
+        if (!histogramCanvasRef.current) return;
+        const canvas = histogramCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+
+        ctx.clearRect(0, 0, w, h);
+
+        const rHist = new Array(256).fill(0);
+        const gHist = new Array(256).fill(0);
+        const bHist = new Array(256).fill(0);
+
+        for (let i = 0; i < imgData.data.length; i += 4) {
+          rHist[imgData.data[i]]++;
+          gHist[imgData.data[i + 1]]++;
+          bHist[imgData.data[i + 2]]++;
+        }
+
+        const maxVal = Math.max(...rHist, ...gHist, ...bHist);
+
+        const drawChannel = (hist, color) => {
+          ctx.beginPath();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          for (let i = 0; i < 256; i++) {
+            const x = (i / 255) * w;
+            const y = h - (hist[i] / maxVal) * h * 0.85;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        };
+
+        drawChannel(rHist, '#ef4444');
+        drawChannel(gHist, '#10b981');
+        drawChannel(bHist, '#3b82f6');
+      };
+
+      const handleFileUpload = (e, setter) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => setter(event.target.result);
+          reader.readAsDataURL(file);
+        }
+      };
+
+      const handleBatchUpload = (e) => {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
+        const batchItems = files.map((file, idx) => ({
+          id: idx,
+          name: file.name,
+          size: (file.size / 1024).toFixed(1) + ' КБ',
+          status: 'pending',
+          progress: 0
+        }));
+        setBatchFiles(batchItems);
+      };
+
+      const startBatchProcessing = () => {
+        if (!batchFiles.length) return;
+        setIsBatchProcessing(true);
+        setBatchProgress(0);
+
+        let current = 0;
+        const interval = setInterval(() => {
+          current++;
+          const progressPct = Math.round((current / batchFiles.length) * 100);
+          setBatchProgress(progressPct);
+
+          setBatchFiles(prev => prev.map((f, i) => i < current ? { ...f, status: 'completed', progress: 100 } : f));
+
+          if (current >= batchFiles.length) {
+            clearInterval(interval);
+            setIsBatchProcessing(false);
+          }
+        }, 600);
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col text-slate-800">
+          
+          {/* ШАПКА НАВИГАЦИИ */}
+          <header className="h-16 border-b border-slate-200 glass-panel px-6 flex items-center justify-between sticky top-0 z-50">
+            <div className="flex items-center space-x-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/20">
+                <Icon name="microscope" className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-base font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                  CleanMicroscope <span className="text-xs bg-cyan-100 text-cyan-700 border border-cyan-300 px-2 py-0.5 rounded-full font-mono">v2.4-PRO</span>
+                </h1>
+                <p className="text-xs text-slate-500">Коррекция неравномерного освещения и артефактов микроскопии</p>
+              </div>
+            </div>
+
+            {/* ВКЛАДКИ РЕЖИМОВ */}
+            <div className="flex items-center space-x-1 glass-panel-subtle p-1 rounded-xl">
+              <button 
+                onClick={() => setActiveTab('single')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${activeTab === 'single' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20' : 'text-slate-600 hover:text-slate-900'}`}>
+                <Icon name="sliders" className="w-3.5 h-3.5" /> Одиночный кадр
+              </button>
+              <button 
+                onClick={() => setActiveTab('batch')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${activeTab === 'batch' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20' : 'text-slate-600 hover:text-slate-900'}`}>
+                <Icon name="layers" className="w-3.5 h-3.5" /> Пакетная обработка {batchFiles.length > 0 && <span className="ml-1 bg-cyan-200 text-cyan-800 text-[10px] px-1.5 rounded-full">{batchFiles.length}</span>}
+              </button>
+              <button 
+                onClick={() => setActiveTab('docs')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${activeTab === 'docs' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20' : 'text-slate-600 hover:text-slate-900'}`}>
+                <Icon name="book-open" className="w-3.5 h-3.5" /> Математика и Спецификация
+              </button>
+            </div>
+
+            {/* КНОПКИ В ПРАВОЙ ЧАСТИ */}
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={generateSyntheticSample}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium transition flex items-center gap-2 shadow-sm">
+                <Icon name="sparkles" className="w-3.5 h-3.5 text-amber-500" /> Сбросить / Демо
+              </button>
+              <a 
+                href={processedUrl || '#'} 
+                download="corrected_microscope_frame.png"
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${processedUrl ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                <Icon name="download" className="w-3.5 h-3.5" /> Экспорт результата
+              </a>
+            </div>
+          </header>
+
+          {/* ОСНОВНОЙ РАБОЧИЙ ПРОСТОР */}
+          <div className="flex-1 flex overflow-hidden">
+            
+            {activeTab === 'single' && (
+              <React.Fragment>
+                {/* ЛЕВАЯ ПАНЕЛЬ УПРАВЛЕНИЯ */}
+                <aside className="w-80 border-r border-slate-200 glass-panel p-5 flex flex-col justify-between overflow-y-auto space-y-6">
+                  
+                  <div className="space-y-6">
+                    {/* ВЫБОР ПРОФИЛЯ */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">Профиль микроскопии</label>
+                      <div className="grid grid-cols-3 gap-1.5 glass-panel-subtle p-1 rounded-lg">
+                        <button 
+                          onClick={() => { setPreset('brightfield'); setBrightness(0); setContrast(10); setGamma(1.0); }}
+                          className={`py-1.5 text-[11px] font-medium rounded transition ${preset === 'brightfield' ? 'bg-white text-cyan-700 border border-slate-300 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                          Светлое поле
+                        </button>
+                        <button 
+                          onClick={() => { setPreset('fluorescence'); setBrightness(15); setContrast(35); setGamma(1.2); }}
+                          className={`py-1.5 text-[11px] font-medium rounded transition ${preset === 'fluorescence' ? 'bg-white text-cyan-700 border border-slate-300 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                          Флуоресц.
+                        </button>
+                        <button 
+                          onClick={() => { setPreset('histology'); setBrightness(-5); setContrast(20); setGamma(0.95); }}
+                          className={`py-1.5 text-[11px] font-medium rounded transition ${preset === 'histology' ? 'bg-white text-cyan-700 border border-slate-300 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                          Гистология
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ЗАГРУЗКА ИЗОБРАЖЕНИЙ */}
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Кадры съемки</h3>
+                      
+                      {/* Сырой снимок */}
+                      <div className="p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400 transition shadow-sm">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span> Исходный кадр (Raw)
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">Обязательно</span>
+                        </div>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => handleFileUpload(e, setRawImg)}
+                          className="block w-full text-[11px] text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Кадр светлого поля */}
+                      <div className="p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400 transition shadow-sm">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-amber-500"></span> Светлое поле (Bright)
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">Обязательно</span>
+                        </div>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => handleFileUpload(e, setBrightImg)}
+                          className="block w-full text-[11px] text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Темный кадр */}
+                      <div className="p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-400 transition shadow-sm">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-slate-500"></span> Темный кадр (Dark)
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">Опционально</span>
+                        </div>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          onChange={(e) => handleFileUpload(e, setDarkImg)}
+                          className="block w-full text-[11px] text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    {/* РЕГУЛИРОВКА ПАРАМЕТРОВ */}
+                    <div className="space-y-4 pt-2 border-t border-slate-200">
+                      <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Настройка цвета</h3>
+
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-600">Смещение яркости</span>
+                          <span className="font-mono text-cyan-600">{brightness}</span>
+                        </div>
+                        <input 
+                          type="range" min="-100" max="100" value={brightness} 
+                          onChange={(e) => setBrightness(Number(e.target.value))}
+                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-cyan-600"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-600">Контрастность</span>
+                          <span className="font-mono text-cyan-600">{contrast}%</span>
+                        </div>
+                        <input 
+                          type="range" min="-50" max="150" value={contrast} 
+                          onChange={(e) => setContrast(Number(e.target.value))}
+                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-cyan-600"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-600">Гамма-коррекция</span>
+                          <span className="font-mono text-cyan-600">{gamma.toFixed(2)}</span>
+                        </div>
+                        <input 
+                          type="range" min="0.2" max="2.5" step="0.05" value={gamma} 
+                          onChange={(e) => setGamma(Number(e.target.value))}
+                          className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-cyan-600"
+                        />
+                      </div>
+                    </div>
+
+                    {/* ГИСТОГРАММА */}
+                    <div className="pt-2 border-t border-slate-200">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">RGB Гистограмма</span>
+                        <div className="flex items-center space-x-1.5 text-[10px] font-semibold">
+                          <span className="text-red-500">R</span>
+                          <span className="text-emerald-600">G</span>
+                          <span className="text-blue-600">B</span>
+                        </div>
+                      </div>
+                      <div className="glass-panel-subtle p-2 rounded-xl border border-slate-200">
+                        <canvas ref={histogramCanvasRef} width="240" height="70" className="w-full h-16 block"></canvas>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* СТАТУС В ФУТЕРЕ ПАНЕЛИ */}
+                  <div className="glass-panel-subtle p-3 rounded-xl text-[11px] space-y-1 font-mono border border-slate-200">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Время расчета:</span>
+                      <span className="text-emerald-600 font-bold">{processingTime ? `${processingTime} мс` : 'Нет'}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>Защита от деления на 0:</span>
+                      <span className="text-cyan-600">Активна</span>
+                    </div>
+                  </div>
+
+                </aside>
+
+                {/* ЦЕНТРАЛЬНАЯ ОБЛАСТЬ СРАВНЕНИЯ */}
+                <main className="flex-1 p-6 flex flex-col justify-between relative overflow-hidden bg-slate-100/50">
+                  
+                  {/* ИНСТРУМЕНТЫ ПРОСМОТРА */}
+                  <div className="flex justify-between items-center mb-4 z-10">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xs font-medium text-slate-700 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Интерактивный срез ДО / ПОСЛЕ
+                      </span>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-xs text-slate-500">Перетаскивайте ползунок мышей</span>
+                    </div>
+
+                    <div className="flex items-center space-x-2 glass-panel p-1 rounded-lg">
+                      <button 
+                        onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
+                        className="p-1 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-200/60 transition">
+                        <Icon name="zoom-out" className="w-4 h-4" />
+                      </button>
+                      <span className="text-xs font-mono text-slate-700 px-2">{Math.round(zoom * 100)}%</span>
+                      <button 
+                        onClick={() => setZoom(Math.min(3, zoom + 0.25))}
+                        className="p-1 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-200/60 transition">
+                        <Icon name="zoom-in" className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setZoom(1)}
+                        className="p-1 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-200/60 transition ml-1" title="Сбросить масштаб">
+                        <Icon name="rotate-ccw" className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ОКНО СРАВНЕНИЯ */}
+                  <div className="flex-1 flex items-center justify-center relative overflow-hidden rounded-2xl glass-panel shadow-xl select-none border border-slate-200">
+                    
+                    {isProcessing && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-md z-30 flex flex-col items-center justify-center gap-3">
+                        <div className="w-8 h-8 border-2 border-cyan-600 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-xs font-mono text-cyan-700 tracking-wider uppercase">Вычисление коррекции...</span>
+                      </div>
+                    )}
+
+                    {rawImg && processedUrl ? (
+                      <div 
+                        className="relative w-full h-full flex items-center justify-center overflow-hidden"
+                        onMouseMove={(e) => {
+                          if (e.buttons === 1) {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+                            setSplitPos((x / rect.width) * 100);
+                          }
+                        }}>
+                        
+                        <div 
+                          className="relative transition-transform duration-100 ease-out flex items-center justify-center"
+                          style={{ transform: `scale(${zoom})`, maxWidth: '90%', maxHeight: '90%' }}>
+                          
+                          {/* ПОСЛЕ */}
+                          <img 
+                            src={processedUrl} 
+                            alt="Скорректированный кадр" 
+                            className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-xl pointer-events-none"
+                          />
+                          <span className="absolute top-3 right-3 bg-emerald-800/90 text-emerald-100 border border-emerald-600/40 px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold backdrop-blur shadow-md">
+                            ПОСЛЕ: Скорректировано
+                          </span>
+
+                          {/* ДО */}
+                          <div 
+                            className="absolute inset-0 overflow-hidden flex items-center justify-center"
+                            style={{ clipPath: `polygon(0 0, ${splitPos}% 0, ${splitPos}% 100%, 0 100%)` }}>
+                            <img 
+                              src={rawImg} 
+                              alt="Исходный снимок" 
+                              className="max-w-full max-h-[70vh] object-contain rounded-lg pointer-events-none"
+                            />
+                            <span className="absolute top-3 left-3 bg-rose-800/90 text-rose-100 border border-rose-600/40 px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold backdrop-blur shadow-md">
+                              ДО: Исходный (Raw)
+                            </span>
+                          </div>
+
+                          {/* РАЗДЕЛИТЕЛЬ */}
+                          <div 
+                            className="absolute top-0 bottom-0 w-0.5 bg-cyan-500 cursor-ew-resize z-20 shadow-[0_0_12px_rgba(6,182,212,0.9)]"
+                            style={{ left: `${splitPos}%` }}>
+                            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 bg-white border-2 border-cyan-500 rounded-full flex items-center justify-center shadow-md slider-handle">
+                            </div>
+                          </div>
+
+                        </div>
+
+                      </div>
+                    ) : (
+                      <div className="text-center space-y-3">
+                        <Icon name="image" className="w-12 h-12 text-slate-400 mx-auto" />
+                        <p className="text-sm text-slate-600">Загрузите файлы исходного и светлого поля для начала анализа.</p>
+                      </div>
+                    )}
+
+                  </div>
+
+                  <div className="mt-4 flex justify-between items-center text-xs text-slate-500 font-mono">
+                    <span>Формула: Corrected = (Raw - Dark) / (Bright - Dark) × Mean(Bright)</span>
+                    <span className="text-slate-700">Разрешение: 600 × 450 px</span>
+                  </div>
+
+                </main>
+              </React.Fragment>
+            )}
+
+            {/* ПАКЕТНАЯ ОБРАБОТКА */}
+            {activeTab === 'batch' && (
+              <main className="flex-1 p-8 flex flex-col space-y-6 overflow-y-auto bg-slate-100/50">
+                <div className="max-w-4xl mx-auto w-full space-y-6">
+                  
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                      <Icon name="layers" className="w-5 h-5 text-cyan-600" /> Пакетная обработка кадров
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">Применение единого профиля коррекции освещения к серии микроснимков.</p>
+                  </div>
+
+                  <div className="border-2 border-dashed border-slate-300 hover:border-cyan-500 glass-panel p-8 rounded-2xl text-center space-y-3 transition">
+                    <Icon name="upload-cloud" className="w-10 h-10 text-cyan-600 mx-auto" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">Перетащите файлы для пакетной обработки</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Поддерживаются форматы PNG, JPG, TIFF</p>
+                    </div>
+                    <input 
+                      type="file" multiple accept="image/*" 
+                      onChange={handleBatchUpload}
+                      className="hidden" id="batchInput" 
+                    />
+                    <label 
+                      htmlFor="batchInput" 
+                      className="inline-block px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-semibold rounded-lg cursor-pointer transition shadow-sm">
+                      Выбрать файлы
+                    </label>
+                  </div>
+
+                  {batchFiles.length > 0 && (
+                    <div className="glass-panel border border-slate-200 rounded-2xl p-6 space-y-4 shadow-xl">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-slate-800">Очередь пакета ({batchFiles.length} файл(ов))</span>
+                        <button 
+                          onClick={startBatchProcessing}
+                          disabled={isBatchProcessing}
+                          className={`px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${isBatchProcessing ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/20'}`}>
+                          <Icon name="play" className="w-3.5 h-3.5" /> Запустить пакетную коррекцию
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs font-mono text-slate-600">
+                          <span>Общий прогресс</span>
+                          <span>{batchProgress}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                          <div className="h-full bg-cyan-500 transition-all duration-300" style={{ width: `${batchProgress}%` }}></div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-slate-200 max-h-60 overflow-y-auto">
+                        {batchFiles.map((file) => (
+                          <div key={file.id} className="flex items-center justify-between p-3 glass-panel-subtle rounded-xl text-xs border border-slate-200">
+                            <div className="flex items-center space-x-3">
+                              <Icon name="file-image" className="w-4 h-4 text-slate-500" />
+                              <span className="font-medium text-slate-800">{file.name}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">({file.size})</span>
+                            </div>
+                            <div>
+                              {file.status === 'completed' ? (
+                                <span className="text-emerald-600 font-mono text-[11px] flex items-center gap-1">
+                                  <Icon name="check-circle-2" className="w-3.5 h-3.5" /> Готово
+                                </span>
+                              ) : file.status === 'pending' && isBatchProcessing ? (
+                                <span className="text-cyan-600 font-mono text-[11px] flex items-center gap-1">
+                                  <Icon name="loader-2" className="w-3.5 h-3.5 animate-spin" /> Обработка...
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 font-mono text-[11px]">Ожидание</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+              </main>
+            )}
+
+            {/* ДОКУМЕНТАЦИЯ И МАТЕМАТИКА */}
+            {activeTab === 'docs' && (
+              <main className="flex-1 p-8 overflow-y-auto bg-slate-100/50">
+                <div className="max-w-3xl mx-auto space-y-6 text-slate-700">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 mb-2">Математическая модель Flat-Field Correction</h2>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Микроскопические изображения подвержены неравномерному освещению, виньетированию линз и запылению оптики. Метод плоского поля устраняет эти системные искажения.
+                    </p>
+                  </div>
+
+                  <div className="glass-panel border border-slate-200 p-5 rounded-2xl space-y-3 font-mono text-xs shadow-lg">
+                    <p className="text-cyan-700 font-semibold">// Основное уравнение коррекции:</p>
+                    <div className="glass-panel-subtle p-4 rounded-xl text-center text-sm text-slate-900 font-bold border border-slate-200">
+                      C = <span className="text-rose-600">(R - D)</span> / <span className="text-amber-600">(F - D)</span> × m
+                    </div>
+                    <ul className="space-y-1.5 text-slate-600 text-[11px]">
+                      <li><strong className="text-slate-800">R (Raw):</strong> Исходное изображение с артефактами.</li>
+                      <li><strong className="text-slate-800">F (Bright-field):</strong> Кадр равномерного освещения без образца.</li>
+                      <li><strong className="text-slate-800">D (Dark frame):</strong> Тепловой шум матрицы (при закрытом затворе).</li>
+                      <li><strong className="text-slate-800">m (Mean):</strong> Среднее значение интенсивности <code className="text-amber-700">(F - D)</code> для сохранения масштаба яркости.</li>
+                    </ul>
+                  </div>
+
+                  <div className="glass-panel-subtle border border-slate-200 p-5 rounded-2xl space-y-2">
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <Icon name="shield-check" className="w-4 h-4 text-emerald-600" /> Защита от деления на ноль
+                    </h3>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Для предотвращения появления артефактов и бесконечных значений знаменатель ограничивается порогом: <code className="glass-panel px-2 py-0.5 rounded text-cyan-700 font-mono">max(1.0, F(x,y) - D(x,y))</code>.
+                    </p>
+                  </div>
+                </div>
+              </main>
+            )}
+
+          </div>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
