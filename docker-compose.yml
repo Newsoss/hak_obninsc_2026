@@ -3,7 +3,7 @@ services:
     build: .
     container_name: microcleaner
     ports:
-      - "8000:8000"
+      - "00:8000"
     # Лимиты и пароль — см. .env.example. Пароль: ACCESS_PASSWORD=... в файле .env рядом
     env_file:
       - path: .env
