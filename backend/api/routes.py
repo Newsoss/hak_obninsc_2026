@@ -154,7 +154,7 @@ async def process_batch(
     settings: Optional[str] = Form(None, description="CorrectionSettings в JSON"),
     format: Optional[str] = Form(None, description="tiff | png | jpeg"),
 ):
-    """Самодостаточный пакетный режим: все файлы в одном запросе, в ответ — ZIP с report.csv и processing.json."""
+    """Самодостаточный пакетный режим: все файлы в одном запросе, в ответ — ZIP с результатами и processing.json."""
     if format not in (None, "", *image_io.FORMATS):
         raise HTTPException(422, f"Неизвестный формат {format}")
     bright, bright_info = await _read(bright_image)

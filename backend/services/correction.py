@@ -1,5 +1,4 @@
 """Сценарии обработки: превью, экспорт одного снимка и пакетная обработка."""
-import csv
 import hashlib
 import io
 import json
@@ -179,19 +178,13 @@ class CorrectionService:
         calibration: Optional[Dict] = None,
     ) -> io.BytesIO:
         """
-        Серия снимков одним профилем -> ZIP: результаты, report.csv и processing.json.
+        Серия снимков одним профилем -> ZIP: результаты и processing.json.
         calibration — {"bright_field": {...}, "dark_field": {...} | None}: имена и SHA-256.
         """
         calibration = calibration or {"bright_field": None, "dark_field": None}
         profile = self.profile(None, bright, dark, settings)
         files_log = []
         archive = io.BytesIO()
-        report = io.StringIO()
-        writer = csv.writer(report, delimiter=";")
-        writer.writerow(
-            ["file", "status", "output", "width", "height", "dtype", "time_ms",
-             "nonuniformity_before_%", "nonuniformity_after_%", "source_sha256", "result_sha256", "error"]
-        )
         used_names = set()
 
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -216,15 +209,8 @@ class CorrectionService:
                         "after": metrics.uniformity(result.image),
                     }
                     files_log.append(entry)
-                    writer.writerow(
-                        [name, "ok", out_name, raw.shape[1], raw.shape[0], raw.dtype, round(result.elapsed_ms, 1),
-                         entry["before"]["nonuniformity"], entry["after"]["nonuniformity"],
-                         source["sha256"], entry["result_sha256"], ""]
-                    )
                 except ValueError as exc:
                     files_log.append({"source": source, "error": str(exc)})
-                    writer.writerow([name, "error", "", "", "", "", "", "", "", source["sha256"], "", str(exc)])
-            zf.writestr("report.csv", "\ufeff" + report.getvalue())
             log = processing_log(None, calibration["bright_field"], calibration["dark_field"], settings)
             del log["source"]
             log["files"] = files_log

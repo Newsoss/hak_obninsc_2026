@@ -72,17 +72,18 @@ def test_sixteen_bit_tiff_roundtrip():
     assert result.dtype == np.uint16 and result.max() > 255
 
 
-def test_batch_zip_with_report():
+def test_batch_zip_contents():
     bright = client.get("/api/demo/bright.png").content
     samples = [client.get(f"/api/demo/sample-{i}.png").content for i in (1, 2, 3)]
     files = [("raw_images", (f"s{i}.png", data)) for i, data in enumerate(samples)]
     files += [("raw_images", ("broken.png", b"not an image")), ("bright_image", ("bright.png", bright))]
     response = client.post("/api/process/batch", files=files, data={"settings": '{"neutralize_color": true}'})
     assert response.status_code == 200, response.text
-    names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
-    assert {"s0_ffc.png", "s1_ffc.png", "s2_ffc.png", "report.csv"} <= set(names)
-    report = zipfile.ZipFile(io.BytesIO(response.content)).read("report.csv").decode("utf-8-sig")
-    assert "broken.png;error" in report
+    archive = zipfile.ZipFile(io.BytesIO(response.content))
+    assert set(archive.namelist()) == {"s0_ffc.png", "s1_ffc.png", "s2_ffc.png", "processing.json"}
+    log = json.loads(archive.read("processing.json"))
+    broken = next(f for f in log["files"] if f["source"]["name"] == "broken.png")
+    assert "error" in broken
 
 
 def test_errors_are_readable():

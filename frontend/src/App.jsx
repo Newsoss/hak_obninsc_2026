@@ -128,6 +128,7 @@ export default function App() {
           controller.signal,
         );
         setPreview(result);
+        log(`Обработка ${frames.raw.name}: ${result.elapsed_ms.toFixed(0)} мс`);
       } catch (err) {
         if (err.name !== 'AbortError') log(`Превью: ${err.message}`, 'error');
       } finally {

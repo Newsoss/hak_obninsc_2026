@@ -13,7 +13,6 @@ const FORMATS = [
   { value: 'png', label: 'PNG' },
   { value: 'jpeg', label: 'JPEG' },
 ];
-const BOM = String.fromCharCode(0xfeff);
 
 let nextId = 1;
 
@@ -32,27 +31,6 @@ function Status({ item }) {
       </span>
     );
   return <span className="text-faint">Ожидает</span>;
-}
-
-function buildReport(items) {
-  const rows = [['file', 'status', 'output', 'time_ms', 'nonuniformity_before_%', 'nonuniformity_after_%', 'vignetting_before_%', 'vignetting_after_%', 'source_sha256', 'result_sha256', 'error']];
-  for (const it of items) {
-    const r = it.result?.report;
-    rows.push([
-      it.file.name,
-      it.status,
-      it.result?.name ?? '',
-      r?.elapsed_ms ?? '',
-      r?.before.nonuniformity ?? '',
-      r?.after.nonuniformity ?? '',
-      r?.before.vignetting ?? '',
-      r?.after.vignetting ?? '',
-      r?.source_sha256 ?? '',
-      r?.result_sha256 ?? '',
-      it.error ?? '',
-    ]);
-  }
-  return BOM + rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
 }
 
 /** Журнал преобразований серии: калибровка, профиль и контрольные суммы каждого файла. */
@@ -177,10 +155,9 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
         for (let n = 1; entries[name]; n += 1) name = it.result.name.replace(/(\.[^.]+)$/, `_${n}$1`);
         entries[name] = [new Uint8Array(buffers[i]), { level: 0 }];
       });
-      entries['report.csv'] = new TextEncoder().encode(buildReport(items));
       entries['processing.json'] = new TextEncoder().encode(buildLog(items, frames, settings));
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
-      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), report.csv, processing.json`);
+      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов) и processing.json`);
     });
   };
 
@@ -345,7 +322,7 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
               <Button size="sm" onClick={downloadFiles} disabled={!done.length || running}>
                 Скачать по одному
               </Button>
-              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты, report.csv и processing.json">
+              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты и processing.json">
                 Скачать ZIP
               </Button>
             </div>
