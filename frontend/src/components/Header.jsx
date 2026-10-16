@@ -12,7 +12,7 @@ export default function Header({ tab, onTab, batchCount, dark, onTheme, onDemo, 
     <header className="shrink-0 border-b border-line bg-surface">
       <div className="flex h-12 items-stretch gap-3 px-3 sm:gap-5 sm:px-4">
         <div className="flex shrink-0 items-center gap-2 font-semibold">
-          <img src="/title_icon.svg" alt="" className="h-5 w-5" />
+          <img src="/icon.svg" alt="" className="h-5 w-5" />
           <span className="hidden sm:inline">MicroCleaner</span>
         </div>
 
