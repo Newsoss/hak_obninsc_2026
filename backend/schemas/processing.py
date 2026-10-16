@@ -35,6 +35,8 @@ class FrameInfo(BaseModel):
     bit_depth: int
     sha256: str = Field(..., description="SHA-256 исходного файла")
     thumbnail: str
+    checks: List[str] = Field(default_factory=list, description="Замечания к калибровочному кадру")
+    metadata: Optional[Dict] = Field(None, description="Метаданные исходного TIFF")
 
 
 class FrameRefs(BaseModel):
@@ -46,6 +48,19 @@ class FrameRefs(BaseModel):
 
 class ExportRequest(FrameRefs):
     format: Optional[Literal["tiff", "png", "jpeg"]] = None
+
+
+class ProbeRequest(FrameRefs):
+    x: int = Field(..., ge=0, description="Столбец пикселя в полном разрешении")
+    y: int = Field(..., ge=0, description="Строка пикселя в полном разрешении")
+
+
+class CropRequest(FrameRefs):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    max_side: int = Field(1600, ge=64, le=4096)
 
 
 class Uniformity(BaseModel):
@@ -62,11 +77,13 @@ class PreviewResponse(BaseModel):
     dtype: str
     elapsed_ms: float
     metrics: Dict[str, Uniformity]
-    histograms: Dict[str, Dict[str, List[int]]]
     warnings: List[str] = []
 
 
 class DemoItem(BaseModel):
     name: str
     title: str
+    filename: str
+    source: str = Field(..., description="files | specimens | synthetic")
+    source_title: str
     url: str

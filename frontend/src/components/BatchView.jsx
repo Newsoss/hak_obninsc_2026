@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { zipSync } from 'fflate';
-import { demoFile, processFile } from '../api/client';
+import { demoCatalog, demoFile, fetchThumbs, processFile } from '../api/client';
+import { contactSheet } from '../lib/canvas';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
 import { batchLog, fileLog, jsonBlob, logName } from '../lib/profile';
@@ -34,6 +35,33 @@ function Status({ item }) {
   return <span className="text-faint">Ожидает</span>;
 }
 
+/** Файлы из перетащенных папок (с вложенными) и отдельных файлов. */
+async function filesFromDrop(dataTransfer) {
+  // webkitGetAsEntry нужно вызвать синхронно, до первого await
+  const entries = Array.from(dataTransfer.items || [])
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter(Boolean);
+  if (!entries.length) return Array.from(dataTransfer.files || []);
+
+  const files = [];
+  const walk = async (entry) => {
+    if (entry.isFile) {
+      files.push(await new Promise((resolve, reject) => entry.file(resolve, reject)));
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+        if (!batch.length) break;
+        for (const child of batch) await walk(child);
+      }
+    }
+  };
+  for (const entry of entries) await walk(entry);
+  return files;
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export default function BatchView({ frames, uploading, onFrame, onClearDark, settings, presetId, onOpen, onCount, log }) {
   const [items, setItems] = useState([]);
   const [format, setFormat] = useState('');
@@ -41,7 +69,8 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
   const [over, setOver] = useState(false);
   const [elapsed, setElapsed] = useState(null);
   const stopRef = useRef(false);
-  const input = useRef(null);
+  const fileInput = useRef(null);
+  const folderInput = useRef(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -50,38 +79,49 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
     () => () =>
       itemsRef.current.forEach((it) => {
         if (it.thumb) URL.revokeObjectURL(it.thumb);
-        if (it.resultUrl) URL.revokeObjectURL(it.resultUrl);
       }),
     [],
   );
 
   const patch = (id, changes) => setItems((list) => list.map((it) => (it.id === id ? { ...it, ...changes } : it)));
 
-  const addFiles = (fileList) => {
-    const files = Array.from(fileList || []).filter(isImageFile);
+  const addFiles = (fileList, source = 'файлы') => {
+    const all = Array.from(fileList || []);
+    const files = all.filter(isImageFile);
+    if (all.length > files.length) log(`Пропущено ${all.length - files.length} файл(ов) не в формате TIFF/PNG/JPEG/BMP`, 'warn');
     if (!files.length) return;
+    log(`Добавлено в пакет (${source}): ${files.length}`);
     setItems((list) => [
       ...list,
       ...files.map((file) => ({
         id: nextId++,
         file,
+        path: file.webkitRelativePath || file.name,
         status: 'queued',
         thumb: browserCanShow(file.name) ? URL.createObjectURL(file) : null,
       })),
     ]);
   };
 
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setOver(false);
+    addFiles(await filesFromDrop(e.dataTransfer), 'перетаскивание');
+  };
+
   const remove = (id) =>
     setItems((list) => {
       const it = list.find((x) => x.id === id);
       if (it?.thumb) URL.revokeObjectURL(it.thumb);
-      if (it?.resultUrl) URL.revokeObjectURL(it.resultUrl);
       return list.filter((x) => x.id !== id);
     });
 
   const loadDemo = async () => {
     try {
-      addFiles(await Promise.all(['sample-1', 'sample-2', 'sample-3'].map(demoFile)));
+      const samples = (await demoCatalog()).filter((i) => i.name.startsWith('sample-'));
+      // Встроенный пример — три снимка, как в сценарии кейса; свой набор — целиком
+      const chosen = samples[0]?.source === 'synthetic' ? samples.slice(0, 3) : samples;
+      addFiles(await Promise.all(chosen.map(demoFile)), 'примеры');
     } catch (err) {
       log(`Примеры не загрузились: ${err.message}`, 'error');
     }
@@ -96,7 +136,8 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
     setRunning(true);
     const started = performance.now();
     log(`Пакет: обработка ${queue.length} файл(ов), светлое поле ${frames.bright.name}${frames.dark ? `, темновой кадр ${frames.dark.name}` : ''}`);
-    const options = { brightId: frames.bright.id, darkId: frames.dark?.id, settings, format };
+    const options = { brightId: frames.bright.id, darkId: frames.dark?.id, settings, format, thumbs: true };
+    const used = { frames: { bright: frames.bright, dark: frames.dark }, settings };
 
     const worker = async () => {
       while (queue.length && !stopRef.current) {
@@ -104,12 +145,12 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
         patch(item.id, { status: 'processing', error: null });
         try {
           const result = await processFile(item.file, options);
-          const resultUrl = browserCanShow(result.blob.type) ? URL.createObjectURL(result.blob) : null;
-          patch(item.id, { status: 'done', result, resultUrl, used: { frames: { bright: frames.bright, dark: frames.dark }, settings } });
-          log(`${item.file.name} → ${result.name}, ${result.report.elapsed_ms.toFixed(0)} мс`);
+          const thumbs = result.thumbsId ? await fetchThumbs(result.thumbsId).catch(() => null) : null;
+          patch(item.id, { status: 'done', result, thumbs, used });
+          log(`${item.path} → ${result.name}, ${result.report.elapsed_ms.toFixed(0)} мс`);
         } catch (err) {
           patch(item.id, { status: 'error', error: err.message });
-          log(`${item.file.name}: ${err.message}`, 'error');
+          log(`${item.path}: ${err.message}`, 'error');
         }
       }
     };
@@ -125,28 +166,63 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
   // Результат и его журнал *_ffc.json — двумя файлами рядом
   const saveItem = async (it) => {
     saveBlob(it.result.blob, it.result.name);
-    await new Promise((r) => setTimeout(r, 250));
+    await wait(250);
     saveBlob(jsonBlob(itemLog(it)), logName(it.result.name));
     log(`Сохранено: ${it.result.name} и ${logName(it.result.name)}`);
-    await new Promise((r) => setTimeout(r, 250));
+    await wait(250);
   };
 
-  const downloadZip = () => {
+  /** Сводка «до/после» по всей серии одной картинкой. */
+  const buildSummary = (finished) => {
+    const rows = finished
+      .filter((it) => it.thumbs)
+      .map((it) => ({
+        name: it.path,
+        note: `${it.result.report.elapsed_ms.toFixed(0)} мс`,
+        before: it.thumbs.before,
+        after: it.thumbs.after,
+      }));
+    if (!rows.length) return null;
+    const preset = PRESETS.find((p) => p.id === presetId)?.name ?? 'свои настройки';
+    const calib = [
+      frames.bright && `светлое поле ${frames.bright.name}`,
+      frames.dark && `темновой кадр ${frames.dark.name}`,
+      preset,
+      new Date().toLocaleString('ru-RU'),
+    ].filter(Boolean);
+    return contactSheet(rows, `MicroCleaner — серия из ${rows.length} снимков`, calib.join(' · '));
+  };
+
+  const downloadSummary = async () => {
+    try {
+      const blob = await buildSummary(items.filter((it) => it.status === 'done'));
+      if (!blob) return;
+      saveBlob(blob, 'microcleaner_summary.png');
+      log('Сводка до/после сохранена: microcleaner_summary.png');
+    } catch (err) {
+      log(`Сводка: ${err.message}`, 'error');
+    }
+  };
+
+  const downloadZip = async () => {
     const finished = items.filter((it) => it.status === 'done');
-    Promise.all(finished.map((it) => it.result.blob.arrayBuffer())).then((buffers) => {
+    try {
+      const buffers = await Promise.all(finished.map((it) => it.result.blob.arrayBuffer()));
       const entries = {};
       finished.forEach((it, i) => {
         let name = it.result.name;
         for (let n = 1; entries[name]; n += 1) name = it.result.name.replace(/(\.[^.]+)$/, `_${n}$1`);
         entries[name] = [new Uint8Array(buffers[i]), { level: 0 }];
+        entries[logName(name)] = new TextEncoder().encode(itemLog(it));
       });
       entries['processing.json'] = new TextEncoder().encode(batchLog(items, frames, settings));
-      finished.forEach((it) => {
-        entries[logName(it.result.name)] = new TextEncoder().encode(itemLog(it));
-      });
+      const summary = await buildSummary(finished);
+      if (summary) entries['summary.png'] = [new Uint8Array(await summary.arrayBuffer()), { level: 0 }];
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
-      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), их журналы *_ffc.json и processing.json`);
-    });
+      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), журналы *_ffc.json, processing.json и summary.png`);
+    } catch (err) {
+      log(`ZIP: ${err.message}`, 'error');
+    }
   };
 
   // Каждый результат отдельным файлом (*_ffc.*) — оригиналы не перезаписываются
@@ -193,8 +269,12 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
       <section className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="mr-auto text-base font-semibold">Пакетная обработка</h2>
-          <Button size="sm" onClick={() => input.current?.click()} disabled={running}>
+          <Button size="sm" onClick={() => fileInput.current?.click()} disabled={running}>
             Добавить файлы
+          </Button>
+          <Button size="sm" onClick={() => folderInput.current?.click()} disabled={running}
+            title="Все снимки из папки, включая вложенные">
+            Добавить папку
           </Button>
           <Button size="sm" onClick={loadDemo} disabled={running}>
             Добавить примеры
@@ -216,25 +296,28 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
           )}
         </div>
 
-        <input ref={input} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+        <input ref={fileInput} type="file" multiple accept={ACCEPT} hidden
+          onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+        <input ref={folderInput} type="file" multiple hidden webkitdirectory=""
+          onChange={(e) => { addFiles(e.target.files, 'папка'); e.target.value = ''; }} />
 
         {!items.length ? (
           <div
             onDragOver={(e) => { e.preventDefault(); setOver(true); }}
             onDragLeave={() => setOver(false)}
-            onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
+            onDrop={onDrop}
             className={`rounded-md border border-dashed p-10 text-center text-sm text-muted ${
               over ? 'border-accent bg-accent-soft' : 'border-line'
             }`}
           >
-            Перетащите сюда снимки серии (TIFF, PNG, JPEG) или нажмите «Добавить файлы».
+            Перетащите сюда снимки серии или целую папку (TIFF, PNG, JPEG).
             <br />
             Ко всем применяются одна калибровка и одни настройки.
           </div>
         ) : (
           <div
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+            onDrop={onDrop}
             className="overflow-hidden rounded-md border border-line bg-surface"
           >
             <table className="w-full table-fixed text-sm">
@@ -248,46 +331,46 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
-                {items.map((it) => (
-                  <tr key={it.id}>
-                    <td className="px-3 py-1.5">
-                      <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded border border-line bg-raised">
-                          {(it.resultUrl || it.thumb) && (
-                            <img src={it.resultUrl || it.thumb} alt="" className="h-full w-full object-cover" />
-                          )}
+                {items.map((it) => {
+                  const preview = it.thumbs?.after || it.thumb;
+                  return (
+                    <tr key={it.id}>
+                      <td className="px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded border border-line bg-raised">
+                            {preview && <img src={preview} alt="" className="h-full w-full object-cover" />}
+                          </div>
+                          <span className="truncate" title={it.error || it.path}>
+                            {it.path}
+                          </span>
                         </div>
-                        <span className="truncate" title={it.error || it.file.name}>
-                          {it.file.name}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="hidden whitespace-nowrap px-3 text-muted sm:table-cell">{formatBytes(it.file.size)}</td>
-                    <td className="whitespace-nowrap px-3 tabular-nums text-muted">
-                      {it.result ? `${it.result.report.elapsed_ms.toFixed(0)} мс` : '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-3 text-xs">
-                      <Status item={it} />
-                    </td>
-                    <td className="whitespace-nowrap px-3 text-right text-xs">
-                      <button type="button" className="text-accent hover:underline" onClick={() => onOpen(it.file)}>
-                        Открыть
-                      </button>
-                      {it.result && (
-                        <button type="button" className="ml-3 text-accent hover:underline"
-                          onClick={() => saveItem(it)}>
-                          Скачать
+                      </td>
+                      <td className="hidden whitespace-nowrap px-3 text-muted sm:table-cell">{formatBytes(it.file.size)}</td>
+                      <td className="whitespace-nowrap px-3 tabular-nums text-muted">
+                        {it.result ? `${it.result.report.elapsed_ms.toFixed(0)} мс` : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 text-xs">
+                        <Status item={it} />
+                      </td>
+                      <td className="whitespace-nowrap px-3 text-right text-xs">
+                        <button type="button" className="text-accent hover:underline" onClick={() => onOpen(it.file)}>
+                          Открыть
                         </button>
-                      )}
-                      {!running && (
-                        <button type="button" className="ml-3 text-faint hover:text-bad" title="Убрать из списка"
-                          onClick={() => remove(it.id)}>
-                          ✕
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        {it.result && (
+                          <button type="button" className="ml-3 text-accent hover:underline" onClick={() => saveItem(it)}>
+                            Скачать
+                          </button>
+                        )}
+                        {!running && (
+                          <button type="button" className="ml-3 text-faint hover:text-bad" title="Убрать из списка"
+                            onClick={() => remove(it.id)}>
+                            ✕
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -304,10 +387,15 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
                 {failed ? `, с ошибкой ${failed}` : ''}
                 {elapsed && !running ? ` · ${(elapsed / 1000).toFixed(1)} с` : ''}
               </span>
+              <Button size="sm" onClick={downloadSummary} disabled={!done.length || running}
+                title="Все снимки серии «до / после» на одной картинке">
+                Сводка до/после
+              </Button>
               <Button size="sm" onClick={downloadFiles} disabled={!done.length || running}>
                 Скачать по одному
               </Button>
-              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты, их журналы и processing.json">
+              <Button size="sm" onClick={downloadZip} disabled={!done.length || running}
+                title="Результаты, их журналы, processing.json и сводка до/после">
                 Скачать ZIP
               </Button>
             </div>

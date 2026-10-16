@@ -38,13 +38,15 @@ async function fileResult(res) {
     blob: await res.blob(),
     name: match ? decodeURIComponent(match[1]) : 'corrected.png',
     report: report ? JSON.parse(report) : null,
+    thumbsId: res.headers.get('X-Thumbs-Id'),
   };
 }
 
-export async function uploadFrame(file) {
+/** role: raw | bright | dark — сервер проверит калибровочный кадр и вернет замечания в checks. */
+export async function uploadFrame(file, role = 'raw') {
   const body = new FormData();
   body.append('file', file);
-  return (await request('/api/frames', { method: 'POST', body })).json();
+  return (await request(`/api/frames?role=${role}`, { method: 'POST', body })).json();
 }
 
 export async function fetchPreview(refs, signal) {
@@ -55,17 +57,37 @@ export async function exportImage(refs) {
   return fileResult(await request('/api/process/export', json(refs)));
 }
 
-export async function processFile(file, { brightId, darkId, settings, format }) {
+/** Значения пикселя до/после в исходных единицах. */
+export async function probePixel(refs, x, y, signal) {
+  return (await request('/api/process/probe', { ...json({ ...refs, x, y }), signal })).json();
+}
+
+/** Участок в полном разрешении для сильного увеличения. */
+export async function cropRegion(refs, rect, signal) {
+  return (await request('/api/process/crop', { ...json({ ...refs, ...rect }), signal })).json();
+}
+
+export async function processFile(file, { brightId, darkId, settings, format, thumbs = false }) {
   const body = new FormData();
   body.append('raw', file);
   body.append('bright_id', brightId);
   if (darkId) body.append('dark_id', darkId);
   body.append('settings', JSON.stringify(settings));
   if (format) body.append('format', format);
+  if (thumbs) body.append('thumbs', 'true');
   return fileResult(await request('/api/process/file', { method: 'POST', body }));
 }
 
-export async function demoFile(name) {
-  const blob = await (await request(`/api/demo/${name}.png`)).blob();
-  return new File([blob], `demo-${name}.png`, { type: 'image/png' });
+export async function fetchThumbs(id) {
+  return (await request(`/api/thumbs/${id}`)).json();
+}
+
+/** Состав примера: [{ name, title, filename, source, source_title, url }]. */
+export async function demoCatalog() {
+  return (await request('/api/demo')).json();
+}
+
+export async function demoFile(item) {
+  const blob = await (await request(item.url)).blob();
+  return new File([blob], item.filename, { type: blob.type });
 }

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
-import { demoFile, exportImage, fetchPreview, uploadFrame } from './api/client';
+import { cropRegion, demoCatalog, demoFile, exportImage, fetchPreview, probePixel, uploadFrame } from './api/client';
 import { frameMeta, saveBlob } from './lib/files';
 import { applyPreset, PRESETS } from './lib/presets';
 import { fileLog, jsonBlob, logName, parseProfile, profileJson } from './lib/profile';
 import BatchView from './components/BatchView';
-import CompareViewer from './components/CompareViewer';
+import CompareViewer, { maxZoomFor } from './components/CompareViewer';
 import FrameSlot from './components/FrameSlot';
 import Header from './components/Header';
 import LogPanel from './components/LogPanel';
@@ -40,6 +40,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState('split');
   const [zoom, setZoom] = useState(1);
+  const [fit, setFit] = useState(1);
+  const [detail, setDetail] = useState(null);
+  const [pixel, setPixel] = useState(null);
   const [exportFormat, setExportFormat] = useState('');
   const [exporting, setExporting] = useState(false);
   const [demoBusy, setDemoBusy] = useState(false);
@@ -88,9 +91,11 @@ export default function App() {
     async (slot, file) => {
       setUploading((u) => ({ ...u, [slot]: true }));
       try {
-        const info = await uploadFrame(file);
+        const info = await uploadFrame(file, slot);
         setFrames((f) => ({ ...f, [slot]: info }));
-        log(`${SLOT_NAMES[slot]}: ${info.name}, ${frameMeta(info)}`);
+        const pixelSize = info.metadata?.pixel_size ? `, пиксель ${info.metadata.pixel_size}` : '';
+        log(`${SLOT_NAMES[slot]}: ${info.name}, ${frameMeta(info)}${pixelSize}`);
+        info.checks.forEach((c) => log(`${SLOT_NAMES[slot]}: ${c}`, 'warn'));
       } catch (err) {
         log(`${SLOT_NAMES[slot]}: ${file.name} — ${err.message}`, 'error');
       } finally {
@@ -103,8 +108,19 @@ export default function App() {
   const loadDemo = async () => {
     setDemoBusy(true);
     try {
-      const [raw, bright, darkFrame] = await Promise.all(['sample-1', 'bright', 'dark'].map(demoFile));
-      await Promise.all([setFrame('raw', raw), setFrame('bright', bright), setFrame('dark', darkFrame)]);
+      const items = await demoCatalog();
+      const find = (name) => items.find((i) => i.name === name);
+      const sample = items.find((i) => i.name.startsWith('sample-'));
+      if (!sample || !find('bright')) throw new Error('в demo_data нет снимка или светлого поля');
+      log(`Пример: ${items[0].source_title}`);
+      const [raw, bright, darkFrame] = await Promise.all(
+        [sample, find('bright'), find('dark')].map((item) => (item ? demoFile(item) : null)),
+      );
+      await Promise.all([
+        setFrame('raw', raw),
+        setFrame('bright', bright),
+        darkFrame ? setFrame('dark', darkFrame) : setFrames((f) => ({ ...f, dark: null })),
+      ]);
       setTab((t) => (t === 'method' ? 'single' : t));
     } catch (err) {
       log(`Пример не загрузился: ${err.message}`, 'error');
@@ -113,10 +129,19 @@ export default function App() {
     }
   };
 
-  // Превью пересчитывается при изменении настроек; устаревшие запросы отменяются
   const settingsKey = JSON.stringify(settings);
+  const refs = useMemo(
+    () =>
+      frames.raw && frames.bright
+        ? { raw_id: frames.raw.id, bright_id: frames.bright.id, dark_id: frames.dark?.id ?? null, settings }
+        : null,
+    [frames.raw?.id, frames.bright?.id, frames.dark?.id, settingsKey], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const resultKey = refs ? `${refs.raw_id}|${refs.bright_id}|${refs.dark_id}|${settingsKey}` : '';
+
+  // Превью пересчитывается при изменении настроек; устаревшие запросы отменяются
   useEffect(() => {
-    if (!frames.raw || !frames.bright) {
+    if (!refs) {
       setPreview(null);
       return undefined;
     }
@@ -124,10 +149,7 @@ export default function App() {
     const timer = setTimeout(async () => {
       setBusy(true);
       try {
-        const result = await fetchPreview(
-          { raw_id: frames.raw.id, bright_id: frames.bright.id, dark_id: frames.dark?.id ?? null, settings },
-          controller.signal,
-        );
+        const result = await fetchPreview(refs, controller.signal);
         setPreview(result);
         log(`Обработка ${frames.raw.name}: ${result.elapsed_ms.toFixed(0)} мс`);
       } catch (err) {
@@ -140,7 +162,12 @@ export default function App() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [frames.raw?.id, frames.bright?.id, frames.dark?.id, settingsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Новый снимок — детальный участок к нему не относится
+  useEffect(() => {
+    setDetail(null);
+  }, [frames.raw?.id]);
 
   // Предупреждения о калибровке пишем в лог один раз, а не при каждом движении ползунка
   const warningsKey = (preview?.warnings ?? []).join('\n');
@@ -148,16 +175,103 @@ export default function App() {
     if (warningsKey) warningsKey.split('\n').forEach((w) => log(w, 'warn'));
   }, [warningsKey, log]);
 
+  // --- Значение пикселя под курсором: не больше одного запроса одновременно ---
+  const probe = useRef({ busy: false, next: null });
+  const runProbe = useCallback(async () => {
+    const state = probe.current;
+    if (state.busy || !state.next) return;
+    const { point, refs: r } = state.next;
+    state.next = null;
+    state.busy = true;
+    try {
+      setPixel(await probePixel(r, point.x, point.y));
+    } catch {
+      /* проба пикселя необязательна */
+    } finally {
+      state.busy = false;
+      runProbe();
+    }
+  }, []);
+
+  const onHover = useCallback(
+    (p) => {
+      if (!p || !refs || !preview) {
+        probe.current.next = null;
+        setPixel(null);
+        return;
+      }
+      const x = Math.min(preview.width - 1, Math.floor(p.u * preview.width));
+      const y = Math.min(preview.height - 1, Math.floor(p.v * preview.height));
+      probe.current.next = { point: { x, y }, refs };
+      runProbe();
+    },
+    [refs, preview, runProbe],
+  );
+
+  // --- Детальный участок в полном разрешении при сильном увеличении ---
+  const viewport = useRef(null);
+  const detailTimer = useRef(null);
+  const detailCtrl = useRef(null);
+  const requestDetail = useCallback(() => {
+    clearTimeout(detailTimer.current);
+    detailCtrl.current?.abort();
+    const vp = viewport.current;
+    if (!vp?.needDetail || !refs || !preview) {
+      setDetail(null);
+      return;
+    }
+    detailTimer.current = setTimeout(async () => {
+      const controller = new AbortController();
+      detailCtrl.current = controller;
+      const W = preview.width;
+      const H = preview.height;
+      try {
+        const crop = await cropRegion(
+          refs,
+          {
+            x0: Math.floor(vp.u0 * W),
+            y0: Math.floor(vp.v0 * H),
+            x1: Math.ceil(vp.u1 * W),
+            y1: Math.ceil(vp.v1 * H),
+            max_side: Math.min(2400, Math.max(64, vp.maxSide)),
+          },
+          controller.signal,
+        );
+        setDetail({
+          key: resultKey,
+          u0: crop.x0 / W,
+          v0: crop.y0 / H,
+          u1: crop.x1 / W,
+          v1: crop.y1 / H,
+          before: crop.before,
+          after: crop.after,
+        });
+      } catch (err) {
+        if (err.name !== 'AbortError') log(`Детальный просмотр: ${err.message}`, 'error');
+      }
+    }, 250);
+  }, [refs, preview, resultKey, log]);
+
+  const onViewport = useCallback(
+    (vp) => {
+      viewport.current = vp;
+      requestDetail();
+    },
+    [requestDetail],
+  );
+
+  // Настройки изменились — участок перезапрашиваем для текущего вида
+  useEffect(() => {
+    requestDetail();
+  }, [preview]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const maxZoom = maxZoomFor(fit);
+  const actualScale = Math.round(fit * zoom * 100);
+
   const download = async () => {
     setExporting(true);
     try {
-      const result = await exportImage({
-        raw_id: frames.raw.id,
-        bright_id: frames.bright.id,
-        dark_id: frames.dark?.id ?? null,
-        settings,
-        format: exportFormat || null,
-      });
+      const result = await exportImage({ ...refs, format: exportFormat || null });
       saveBlob(result.blob, result.name);
       // Журнал рядом с результатом: из чего и с какими настройками он получен
       await new Promise((r) => setTimeout(r, 250));
@@ -166,6 +280,7 @@ export default function App() {
         `Сохранено: ${frames.raw.name} → ${result.name} и ${logName(result.name)}, ` +
           `${result.report?.elapsed_ms?.toFixed(0) ?? '?'} мс. Исходный файл не изменён.`,
       );
+      if (result.report?.source_metadata) log('Метаданные исходного TIFF перенесены в результат');
     } catch (err) {
       log(`Сохранение: ${err.message}`, 'error');
     } finally {
@@ -211,6 +326,17 @@ export default function App() {
     return 'Загрузите снимок препарата.';
   }, [frames.raw, frames.bright]);
 
+  const status = useMemo(() => {
+    if (tab !== 'single' || !preview) return '';
+    if (pixel) {
+      const values = (v) => v.join(' ');
+      const chan = pixel.channels === 'rgb' ? 'RGB ' : '';
+      return `x ${pixel.x}, y ${pixel.y} · ${chan}до ${values(pixel.before)} → после ${values(pixel.after)}`;
+    }
+    const pixelSize = frames.raw?.metadata?.pixel_size ? ` · пиксель ${frames.raw.metadata.pixel_size}` : '';
+    return `${preview.width}×${preview.height}, ${preview.dtype}${pixelSize} · обработка ${preview.elapsed_ms.toFixed(0)} мс`;
+  }, [tab, preview, pixel, frames.raw]);
+
   return (
     <div className="flex h-full flex-col">
       <Header
@@ -246,13 +372,26 @@ export default function App() {
           <section className="order-first flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2 p-3 lg:order-none lg:min-h-0">
             <div className="flex flex-wrap items-center gap-2">
               <Segmented options={VIEW_MODES} value={mode} onChange={setMode} />
-              <div className="flex items-center gap-1 text-xs text-muted">
+              <div className="flex items-center gap-0.5 text-xs text-muted">
                 <Button variant="ghost" size="icon" title="Отдалить" onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>
                   −
                 </Button>
-                <span className="w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-                <Button variant="ghost" size="icon" title="Приблизить" onClick={() => setZoom((z) => Math.min(24, z * 1.5))}>
+                <button
+                  type="button"
+                  className="focus-ring w-12 rounded py-1 text-center tabular-nums hover:bg-raised hover:text-ink disabled:pointer-events-none"
+                  disabled={!preview || zoom <= 1}
+                  onClick={() => setZoom(1)}
+                  title="Масштаб относительно реального размера снимка. Нажмите, чтобы вписать в окно"
+                >
+                  {preview ? `${actualScale}%` : '—'}
+                </button>
+                <Button variant="ghost" size="icon" title="Приблизить"
+                  onClick={() => setZoom((z) => Math.min(maxZoom, z * 1.5))}>
                   +
+                </Button>
+                <Button variant="ghost" size="sm" disabled={!preview} title="Один пиксель снимка — один пиксель экрана"
+                  onClick={() => setZoom(Math.min(maxZoom, Math.max(1, 1 / fit)))}>
+                  1:1
                 </Button>
               </div>
               <div className="ml-auto flex items-center gap-2">
@@ -274,7 +413,19 @@ export default function App() {
               </div>
             </div>
 
-            <CompareViewer preview={preview} mode={mode} busy={busy} zoom={zoom} onZoom={setZoom} emptyHint={emptyHint} />
+            <CompareViewer
+              preview={preview}
+              mode={mode}
+              busy={busy}
+              zoom={zoom}
+              onZoom={setZoom}
+              emptyHint={emptyHint}
+              onHover={onHover}
+              detail={detail?.key === resultKey ? detail : null}
+              onViewport={onViewport}
+              onFit={setFit}
+            />
+
           </section>
         </main>
       )}
@@ -328,11 +479,7 @@ export default function App() {
             </span>
           )}
         </button>
-        {tab === 'single' && preview && (
-          <span className="ml-auto truncate">
-            {preview.width}×{preview.height}, {preview.dtype} · обработка {preview.elapsed_ms.toFixed(0)} мс
-          </span>
-        )}
+        {status && <span className="ml-auto truncate tabular-nums">{status}</span>}
       </footer>
     </div>
   );

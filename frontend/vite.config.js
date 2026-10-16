@@ -11,6 +11,9 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': target,
+      '/docs': target,
+      '/redoc': target,
+      '/openapi.json': target,
     },
   },
 });

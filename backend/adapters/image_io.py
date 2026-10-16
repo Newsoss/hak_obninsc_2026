@@ -2,7 +2,7 @@
 import base64
 import io
 from pathlib import PurePath
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -76,6 +76,85 @@ def read_image(data: bytes, filename: str) -> np.ndarray:
     return np.ascontiguousarray(image)
 
 
+TEXT_TAGS = {"Make": 271, "Model": 272, "Artist": 315, "Copyright": 33432}
+RESOLUTION_UNITS = {1: None, 2: 25400.0, 3: 10000.0}  # мкм в единице: дюйм, сантиметр
+
+
+def _plain(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def read_metadata(data: bytes, filename: str) -> Dict:
+    """
+    Метаданные исходного TIFF, которые нужно сохранить в результате: разрешение
+    (размер пикселя), дата съемки, камера, автор и исходное описание (ImageJ/OME).
+    Для остальных форматов — пустой словарь.
+    """
+    if PurePath(filename or "").suffix.lower() not in (".tif", ".tiff"):
+        return {}
+    try:
+        with tifffile.TiffFile(io.BytesIO(data)) as tif:
+            tags = tif.pages[0].tags
+            meta: Dict = {}
+            xres, yres = tags.get("XResolution"), tags.get("YResolution")
+            if xres is not None and yres is not None:
+                to_float = lambda v: v[0] / v[1] if isinstance(v, tuple) and v[1] else float(v)  # noqa: E731
+                meta["resolution"] = [to_float(xres.value), to_float(yres.value)]
+                unit = tags.get("ResolutionUnit")
+                meta["resolution_unit"] = int(unit.value) if unit is not None else 2
+            for name in ("DateTime", "Software", "ImageDescription", *TEXT_TAGS):
+                tag = tags.get(name)
+                if tag is not None and str(tag.value).strip():
+                    meta[name] = str(tag.value)[:4000]
+            if tif.is_imagej and tif.imagej_metadata:
+                meta["ImageJ"] = {k: _plain(v) for k, v in tif.imagej_metadata.items()}
+            if tif.is_ome:
+                meta["OME"] = True
+    except Exception:  # noqa: BLE001 — метаданные не должны ломать обработку
+        return {}
+
+    pixel = pixel_size(meta)
+    if pixel:
+        meta["pixel_size"] = pixel
+    return meta
+
+
+def pixel_size(meta: Dict) -> Optional[str]:
+    """Размер пикселя человеческим языком: '0.3125 мкм'."""
+    resolution = meta.get("resolution")
+    if not resolution or not resolution[0]:
+        return None
+    um_per_unit = RESOLUTION_UNITS.get(meta.get("resolution_unit", 2))
+    if um_per_unit:
+        return f"{um_per_unit / resolution[0]:.4g} мкм"
+    unit = (meta.get("ImageJ") or {}).get("unit")
+    return f"{1 / resolution[0]:.4g} {unit}" if unit else None
+
+
+def _ascii(text: str) -> str:
+    return text.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def _tiff_tags(meta: Optional[Dict]) -> Dict:
+    """Аргументы tifffile.imwrite, переносящие метаданные исходника в результат."""
+    if not meta:
+        return {}
+    kwargs: Dict = {}
+    if meta.get("resolution"):
+        kwargs["resolution"] = tuple(meta["resolution"])
+        kwargs["resolutionunit"] = meta.get("resolution_unit", 2)
+    if meta.get("DateTime"):
+        kwargs["datetime"] = _ascii(meta["DateTime"])[:19]
+    extratags = [
+        (code, "s", 0, _ascii(meta[name]), True) for name, code in TEXT_TAGS.items() if meta.get(name)
+    ]
+    if extratags:
+        kwargs["extratags"] = extratags
+    return kwargs
+
+
 def _to_bgr(image: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if image.ndim == 3 else image
 
@@ -106,6 +185,16 @@ def to_data_url(image_u8: np.ndarray, fmt: str = "jpeg", quality: int = 90) -> s
     return f"data:{mime};base64,{base64.b64encode(encoded).decode('ascii')}"
 
 
+MIME_TYPES = {
+    ".tif": "image/tiff", ".tiff": "image/tiff", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".bmp": "image/bmp",
+}
+
+
+def mime_for(filename: str) -> str:
+    return MIME_TYPES.get(PurePath(filename or "").suffix.lower(), "application/octet-stream")
+
+
 def format_for(filename: str) -> str:
     ext = PurePath(filename or "").suffix.lower()
     if ext in (".tif", ".tiff"):
@@ -121,11 +210,16 @@ def output_name(filename: str, fmt: str) -> str:
 
 
 def encode_image(
-    image: np.ndarray, fmt: str, white: Optional[float] = None, description: Optional[str] = None
+    image: np.ndarray,
+    fmt: str,
+    white: Optional[float] = None,
+    description: Optional[str] = None,
+    metadata: Optional[Dict] = None,
 ) -> Tuple[bytes, str]:
     """
     Кодирует массив в файл заданного формата. Возвращает (байты, MIME).
     description — журнал обработки; в TIFF записывается в тег ImageDescription.
+    metadata — метаданные исходного TIFF (read_metadata), переносятся в теги результата.
     """
     if fmt not in FORMATS:
         raise ValueError(f"неизвестный формат {fmt}")
@@ -137,6 +231,7 @@ def encode_image(
         tifffile.imwrite(
             buffer, image, photometric=photometric, compression="zlib",
             description=description, metadata=None if description else {},
+            software="MicroCleaner 2.0", **_tiff_tags(metadata),
         )
         return buffer.getvalue(), mime
 
