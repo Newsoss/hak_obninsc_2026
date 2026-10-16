@@ -9,6 +9,7 @@ import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -19,6 +20,7 @@ class Frame:
     name: str
     image: np.ndarray
     sha256: str = ""
+    meta: Optional[dict] = None
 
 
 class FrameStore:
@@ -29,8 +31,8 @@ class FrameStore:
         self._max_items = max_items
         self._lock = threading.Lock()
 
-    def put(self, name: str, image: np.ndarray, sha256: str = "") -> Frame:
-        frame = Frame(id=uuid.uuid4().hex, name=name, image=image, sha256=sha256)
+    def put(self, name: str, image: np.ndarray, sha256: str = "", meta: Optional[dict] = None) -> Frame:
+        frame = Frame(id=uuid.uuid4().hex, name=name, image=image, sha256=sha256, meta=meta)
         with self._lock:
             self._frames[frame.id] = frame
             self._bytes += image.nbytes

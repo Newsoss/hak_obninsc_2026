@@ -29,11 +29,11 @@ export default function SettingsPanel({ settings, presetId, onChange, onPreset, 
         </select>
         <div className="flex gap-2">
           <Button size="sm" className="flex-1 justify-center" onClick={() => fileInput.current?.click()}
-            title="Файл профиля или журнал *_ffc.json от сохранённого результата">
-            Загрузить из файла
+            title="Загрузить настройки из файла профиля или журнала *_ffc.json">
+            Загрузить
           </Button>
-          <Button size="sm" className="flex-1 justify-center" onClick={onSaveProfile}>
-            Сохранить в файл
+          <Button size="sm" className="flex-1 justify-center" onClick={onSaveProfile} title="Сохранить настройки в файл профиля">
+            Сохранить
           </Button>
         </div>
         <input

@@ -39,7 +39,11 @@ export function fileLog({ source, result, frames, settings }) {
     method: 'flat-field correction',
     formula: FORMULA,
     created: new Date().toISOString(),
-    source: { name: source.name, sha256: result.report?.source_sha256 ?? source.sha256 ?? null },
+    source: {
+      name: source.name,
+      sha256: result.report?.source_sha256 ?? source.sha256 ?? null,
+      metadata: result.report?.source_metadata ?? undefined,
+    },
     bright_field: calibration(frames.bright),
     dark_field: calibration(frames.dark),
     settings,
