@@ -6,4 +6,7 @@ services:
       - "8000:8000"
     environment:
       - CORS_ORIGINS=*
+    volumes:
+      # Свой пример для кнопки «Открыть пример» — меняется без пересборки образа
+      - ./backend/demo_data:/app/demo_data:ro
     restart: unless-stopped

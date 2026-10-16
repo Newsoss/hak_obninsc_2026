@@ -83,4 +83,7 @@ class PreviewResponse(BaseModel):
 class DemoItem(BaseModel):
     name: str
     title: str
+    filename: str
+    source: str = Field(..., description="files | specimens | synthetic")
+    source_title: str
     url: str

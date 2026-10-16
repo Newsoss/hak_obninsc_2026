@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { zipSync } from 'fflate';
-import { demoFile, fetchThumbs, processFile } from '../api/client';
+import { demoCatalog, demoFile, fetchThumbs, processFile } from '../api/client';
 import { contactSheet } from '../lib/canvas';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
@@ -118,7 +118,10 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
 
   const loadDemo = async () => {
     try {
-      addFiles(await Promise.all(['sample-1', 'sample-2', 'sample-3'].map(demoFile)), 'примеры');
+      const samples = (await demoCatalog()).filter((i) => i.name.startsWith('sample-'));
+      // Встроенный пример — три снимка, как в сценарии кейса; свой набор — целиком
+      const chosen = samples[0]?.source === 'synthetic' ? samples.slice(0, 3) : samples;
+      addFiles(await Promise.all(chosen.map(demoFile)), 'примеры');
     } catch (err) {
       log(`Примеры не загрузились: ${err.message}`, 'error');
     }

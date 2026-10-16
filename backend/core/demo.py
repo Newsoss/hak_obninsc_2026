@@ -1,7 +1,11 @@
 """
-Генератор реалистичного демо-набора: окрашенный препарат, снятый с
-виньетированием, косым светом, теплым оттенком осветителя, пылью на оптике
-и темновым шумом матрицы. Детерминирован — одинаков при каждом запуске.
+Генератор демо-набора: препарат, снятый с виньетированием, косым светом,
+теплым оттенком осветителя, пылью на оптике и темновым шумом матрицы.
+Детерминирован — одинаков при каждом запуске.
+
+Препарат берется либо встроенный (нарисованные клетки), либо из любого
+чистого снимка (sample_from_image): на него накладывается та же искусственная
+засветка, а светлое поле и темновой кадр к нему генерируются точно.
 """
 from functools import lru_cache
 from typing import Dict
@@ -15,6 +19,7 @@ ILLUMINANT_TINT = np.array([1.0, 0.92, 0.76], dtype=np.float32)
 SAMPLE_COUNT = 4
 
 
+@lru_cache(maxsize=1)
 def _optics() -> np.ndarray:
     """Поле освещенности оптического тракта (общее для всех кадров серии)."""
     rng = np.random.default_rng(7)
@@ -67,12 +72,10 @@ def _specimen(seed: int) -> np.ndarray:
     cytoplasm = [(0.93, 0.62, 0.80), (0.88, 0.55, 0.74), (0.95, 0.72, 0.84)]
     nucleus = [(0.42, 0.30, 0.62), (0.35, 0.25, 0.55)]
 
-    fibers = np.zeros((HEIGHT, WIDTH), np.float32)
-    for _ in range(18):
-        pts = np.cumsum(rng.normal(0, 40, (8, 2)), axis=0) + rng.uniform(0, [WIDTH, HEIGHT])
-        cv2.polylines(fibers, [pts.astype(np.int32)], False, 1.0, 3)
-    fibers = cv2.GaussianBlur(fibers, (0, 0), 2.0)[..., None]
-    t *= 1 - fibers * (1 - np.array([0.96, 0.78, 0.86], np.float32))
+    # Межклеточное вещество: слабая неоднородная окраска фона
+    stroma = cv2.GaussianBlur(rng.random((HEIGHT, WIDTH)).astype(np.float32), (0, 0), 18)
+    stroma = (stroma - stroma.min()) / max(float(np.ptp(stroma)), 1e-6)
+    t *= 1 - 0.12 * stroma[..., None] * (1 - np.array([0.95, 0.80, 0.88], np.float32))
 
     for _ in range(int(rng.integers(55, 80))):
         cx, cy = int(rng.integers(0, WIDTH)), int(rng.integers(0, HEIGHT))
@@ -92,6 +95,36 @@ def _specimen(seed: int) -> np.ndarray:
 def _to_u8(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     noisy = image + rng.normal(0, 1.8, image.shape).astype(np.float32)
     return np.clip(np.rint(noisy), 0, 255).astype(np.uint8)
+
+
+def specimen_from_image(image: np.ndarray) -> np.ndarray:
+    """
+    Пропускание препарата из готового снимка: кадр обрезается по центру до 4:3,
+    приводится к размеру демо-набора и нормируется так, что фон ≈ 1.
+    Снимок должен быть равномерно освещен — иначе его собственная неравномерность
+    останется и после коррекции.
+    """
+    img = image.astype(np.float32)
+    if img.ndim == 2:
+        img = np.repeat(img[..., None], 3, axis=2)
+    h, w = img.shape[:2]
+    target = WIDTH / HEIGHT
+    if w / h > target:
+        cw = int(round(h * target))
+        img = img[:, (w - cw) // 2 : (w - cw) // 2 + cw]
+    else:
+        ch = int(round(w / target))
+        img = img[(h - ch) // 2 : (h - ch) // 2 + ch]
+    interp = cv2.INTER_AREA if img.shape[1] > WIDTH else cv2.INTER_CUBIC
+    img = cv2.resize(img, (WIDTH, HEIGHT), interpolation=interp)
+    white = float(np.percentile(img.mean(axis=2), 99.5))
+    return np.clip(img / max(white, 1e-6), 0.02, 1.0)
+
+
+def sample_from_image(image: np.ndarray, seed: int = 1) -> np.ndarray:
+    """Снимок препарата с искусственной засветкой — пара к generate('bright'/'dark')."""
+    light = BRIGHT_LEVEL * _optics() * specimen_from_image(image)
+    return _to_u8(_dark(np.random.default_rng(11)) + light, np.random.default_rng(200 + seed))
 
 
 @lru_cache(maxsize=8)

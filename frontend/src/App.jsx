@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SquareTerminal } from 'lucide-react';
-import { cropRegion, demoFile, exportImage, fetchPreview, probePixel, uploadFrame } from './api/client';
+import { cropRegion, demoCatalog, demoFile, exportImage, fetchPreview, probePixel, uploadFrame } from './api/client';
 import { frameMeta, saveBlob } from './lib/files';
 import { applyPreset, PRESETS } from './lib/presets';
 import { fileLog, jsonBlob, logName, parseProfile, profileJson } from './lib/profile';
@@ -108,8 +108,19 @@ export default function App() {
   const loadDemo = async () => {
     setDemoBusy(true);
     try {
-      const [raw, bright, darkFrame] = await Promise.all(['sample-1', 'bright', 'dark'].map(demoFile));
-      await Promise.all([setFrame('raw', raw), setFrame('bright', bright), setFrame('dark', darkFrame)]);
+      const items = await demoCatalog();
+      const find = (name) => items.find((i) => i.name === name);
+      const sample = items.find((i) => i.name.startsWith('sample-'));
+      if (!sample || !find('bright')) throw new Error('в demo_data нет снимка или светлого поля');
+      log(`Пример: ${items[0].source_title}`);
+      const [raw, bright, darkFrame] = await Promise.all(
+        [sample, find('bright'), find('dark')].map((item) => (item ? demoFile(item) : null)),
+      );
+      await Promise.all([
+        setFrame('raw', raw),
+        setFrame('bright', bright),
+        darkFrame ? setFrame('dark', darkFrame) : setFrames((f) => ({ ...f, dark: null })),
+      ]);
       setTab((t) => (t === 'method' ? 'single' : t));
     } catch (err) {
       log(`Пример не загрузился: ${err.message}`, 'error');

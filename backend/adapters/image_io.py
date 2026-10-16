@@ -185,6 +185,16 @@ def to_data_url(image_u8: np.ndarray, fmt: str = "jpeg", quality: int = 90) -> s
     return f"data:{mime};base64,{base64.b64encode(encoded).decode('ascii')}"
 
 
+MIME_TYPES = {
+    ".tif": "image/tiff", ".tiff": "image/tiff", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".bmp": "image/bmp",
+}
+
+
+def mime_for(filename: str) -> str:
+    return MIME_TYPES.get(PurePath(filename or "").suffix.lower(), "application/octet-stream")
+
+
 def format_for(filename: str) -> str:
     ext = PurePath(filename or "").suffix.lower()
     if ext in (".tif", ".tiff"):

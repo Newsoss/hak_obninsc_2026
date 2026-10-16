@@ -181,3 +181,37 @@ def test_batch_file_thumbnails(demo_ids):
     )
     thumbs = client.get(f"/api/thumbs/{response.headers['x-thumbs-id']}").json()
     assert thumbs["before"].startswith("data:image/jpeg") and thumbs["after"].startswith("data:image/jpeg")
+
+
+def test_demo_from_own_files(tmp_path, monkeypatch):
+    bright = image_io.encode_image(np.full((30, 40), 200, np.uint8), "png")[0]
+    raw = image_io.encode_image(np.full((30, 40), 100, np.uint16), "tiff")[0]
+    (tmp_path / "bright.png").write_bytes(bright)
+    (tmp_path / "cells.tif").write_bytes(raw)
+    (tmp_path / "notes.txt").write_text("не снимок")
+    monkeypatch.setenv("DEMO_DIR", str(tmp_path))
+    items = {i["name"]: i for i in client.get("/api/demo").json()}
+    assert set(items) == {"bright", "sample-1"}
+    assert items["sample-1"]["filename"] == "cells.tif" and items["sample-1"]["source"] == "files"
+    response = client.get("/api/demo/sample-1")
+    assert response.content == raw and response.headers["content-type"] == "image/tiff"
+
+
+def test_demo_from_specimens_gets_synthetic_light(tmp_path, monkeypatch):
+    specimen = np.full((300, 500, 3), 240, np.uint8)
+    for y in range(20, 300, 40):  # мелкие «клетки» по всему полю, фон ровный
+        for x in range(20, 500, 40):
+            specimen[y : y + 8, x : x + 8] = (180, 60, 140)
+    (tmp_path / "specimens").mkdir()
+    (tmp_path / "specimens" / "tissue.jpg").write_bytes(image_io.encode_image(specimen, "jpeg")[0])
+    monkeypatch.setenv("DEMO_DIR", str(tmp_path))
+    items = {i["name"]: i for i in client.get("/api/demo").json()}
+    assert set(items) == {"bright", "dark", "sample-1"} and items["sample-1"]["source"] == "specimens"
+    ids = {n: upload(client.get(f"/api/demo/{n}").content, f"{n}.png")["id"] for n in items}
+    body = client.post(
+        "/api/process/preview",
+        json={"raw_id": ids["sample-1"], "bright_id": ids["bright"], "dark_id": ids["dark"], "settings": {"color": {}}},
+    ).json()
+    # Искусственная засветка убирается почти полностью
+    assert body["metrics"]["before"]["nonuniformity"] > 15
+    assert body["metrics"]["after"]["nonuniformity"] < 3

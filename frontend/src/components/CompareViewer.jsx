@@ -13,7 +13,7 @@ export const maxZoomFor = (fit) => Math.max(4, 8 / Math.max(fit, 1e-6));
 
 function Label({ children, className = '' }) {
   return (
-    <span className={`pointer-events-none absolute z-10 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white ${className}`}>
+    <span className={`pointer-events-none absolute z-10 rounded bg-black/65 px-2 py-0.5 text-sm font-medium text-white ${className}`}>
       {children}
     </span>
   );
@@ -239,6 +239,8 @@ export default function CompareViewer({
               </div>
             </div>
           </div>
+          <Label className="left-2 top-2">До</Label>
+          <Label className="right-2 top-2">После</Label>
         </div>
       )}
 
@@ -251,7 +253,8 @@ export default function CompareViewer({
             <div className="absolute" style={stageStyle}>
               {img(src, label)}
               {detailImg(hi)}
-              </div>
+            </div>
+            <Label className="left-2 top-2">{label}</Label>
           </div>
         ))}
 

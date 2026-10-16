@@ -10,7 +10,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from adapters import image_io
-from core import demo
 from core.calibration import check_frame
 from schemas.processing import (
     CorrectionSettings,
@@ -22,6 +21,7 @@ from schemas.processing import (
     PreviewResponse,
     ProbeRequest,
 )
+from services import demo_data
 from services.correction import CorrectionService, sha256, thumbnail
 from services.frame_store import Frame, FrameStore
 
@@ -226,15 +226,32 @@ async def process_batch(
 
 @router.get("/demo", response_model=List[DemoItem], tags=["Demo"])
 def demo_catalog():
-    return [DemoItem(name=n, title=t, url=f"/api/demo/{n}.png") for n, t in demo.catalog().items()]
+    """Состав примера: готовый набор из demo_data, свои снимки с засветкой или встроенный синтетический."""
+    return [
+        DemoItem(
+            name=item.name,
+            title=item.title,
+            filename=item.filename,
+            source=item.source,
+            source_title=demo_data.SOURCES[item.source],
+            url=f"/api/demo/{item.name}",
+        )
+        for item in demo_data.catalog().values()
+    ]
 
 
-@router.get("/demo/{name}.png", tags=["Demo"])
+@router.get("/demo/{name}", tags=["Demo"])
 def demo_image(name: str):
-    """Синтетический кадр с виньетированием, пылью, оттенком и темновым шумом."""
+    """Файл примера: bright, dark или sample-N (расширение в имени можно не указывать)."""
+    item = demo_data.catalog().get(name.rsplit(".", 1)[0] if "." in name else name)
+    if item is None:
+        raise HTTPException(404, "Нет такого файла примера")
     try:
-        image = demo.generate(name)
-    except (KeyError, ValueError):
-        raise HTTPException(404, "Нет такого демо-кадра") from None
-    data, mime = image_io.encode_image(image, "png")
-    return Response(data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
+        data = item.load()
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"Не удалось прочитать пример {item.filename}: {exc}") from None
+    return Response(
+        data,
+        media_type=image_io.mime_for(item.filename),
+        headers={"Content-Disposition": _attachment(item.filename), "Cache-Control": "no-cache"},
+    )
