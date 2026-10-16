@@ -3,6 +3,7 @@ import { zipSync } from 'fflate';
 import { demoFile, processFile } from '../api/client';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
+import { batchLog, fileLog, jsonBlob, logName } from '../lib/profile';
 import FrameSlot from './FrameSlot';
 import { Button, Section, Spinner } from './ui';
 
@@ -31,33 +32,6 @@ function Status({ item }) {
       </span>
     );
   return <span className="text-faint">Ожидает</span>;
-}
-
-/** Журнал преобразований серии: калибровка, профиль и контрольные суммы каждого файла. */
-function buildLog(items, frames, settings) {
-  const calib = (f) => (f ? { name: f.name, sha256: f.sha256, size: `${f.width}x${f.height}`, dtype: f.dtype } : null);
-  return JSON.stringify(
-    {
-      software: 'MicroCleaner 2.0',
-      method: 'flat-field correction',
-      formula: 'C = max(R - D, 0) / max(F - D, 0.01 * mean(F - D)) * mean(F - D)',
-      created: new Date().toISOString(),
-      bright_field: calib(frames.bright),
-      dark_field: calib(frames.dark),
-      settings,
-      files: items.map((it) => ({
-        source: { name: it.file.name, sha256: it.result?.report?.source_sha256 ?? null },
-        status: it.status,
-        output: it.result?.name ?? null,
-        result_sha256: it.result?.report?.result_sha256 ?? null,
-        elapsed_ms: it.result?.report?.elapsed_ms ?? null,
-        error: it.error ?? null,
-      })),
-      note: 'Исследовательская обработка. Исходные файлы не изменялись и должны храниться отдельно.',
-    },
-    null,
-    2,
-  );
 }
 
 export default function BatchView({ frames, uploading, onFrame, onClearDark, settings, presetId, onOpen, onCount, log }) {
@@ -131,7 +105,7 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
         try {
           const result = await processFile(item.file, options);
           const resultUrl = browserCanShow(result.blob.type) ? URL.createObjectURL(result.blob) : null;
-          patch(item.id, { status: 'done', result, resultUrl });
+          patch(item.id, { status: 'done', result, resultUrl, used: { frames: { bright: frames.bright, dark: frames.dark }, settings } });
           log(`${item.file.name} → ${result.name}, ${result.report.elapsed_ms.toFixed(0)} мс`);
         } catch (err) {
           patch(item.id, { status: 'error', error: err.message });
@@ -146,6 +120,17 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
     setRunning(false);
   };
 
+  const itemLog = (it) => fileLog({ source: it.file, result: it.result, ...it.used });
+
+  // Результат и его журнал *_ffc.json — двумя файлами рядом
+  const saveItem = async (it) => {
+    saveBlob(it.result.blob, it.result.name);
+    await new Promise((r) => setTimeout(r, 250));
+    saveBlob(jsonBlob(itemLog(it)), logName(it.result.name));
+    log(`Сохранено: ${it.result.name} и ${logName(it.result.name)}`);
+    await new Promise((r) => setTimeout(r, 250));
+  };
+
   const downloadZip = () => {
     const finished = items.filter((it) => it.status === 'done');
     Promise.all(finished.map((it) => it.result.blob.arrayBuffer())).then((buffers) => {
@@ -155,20 +140,20 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
         for (let n = 1; entries[name]; n += 1) name = it.result.name.replace(/(\.[^.]+)$/, `_${n}$1`);
         entries[name] = [new Uint8Array(buffers[i]), { level: 0 }];
       });
-      entries['processing.json'] = new TextEncoder().encode(buildLog(items, frames, settings));
+      entries['processing.json'] = new TextEncoder().encode(batchLog(items, frames, settings));
+      finished.forEach((it) => {
+        entries[logName(it.result.name)] = new TextEncoder().encode(itemLog(it));
+      });
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
-      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов) и processing.json`);
+      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), их журналы *_ffc.json и processing.json`);
     });
   };
 
   // Каждый результат отдельным файлом (*_ffc.*) — оригиналы не перезаписываются
   const downloadFiles = async () => {
     for (const it of items.filter((x) => x.status === 'done')) {
-      saveBlob(it.result.blob, it.result.name);
-      await new Promise((r) => setTimeout(r, 250));
+      await saveItem(it);
     }
-    saveBlob(new Blob([buildLog(items, frames, settings)], { type: 'application/json' }), 'processing.json');
-    log(`Сохранено по одному: ${items.filter((x) => x.status === 'done').length} файл(ов) и processing.json`);
   };
 
   const done = items.filter((it) => it.status === 'done');
@@ -290,7 +275,7 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
                       </button>
                       {it.result && (
                         <button type="button" className="ml-3 text-accent hover:underline"
-                          onClick={() => saveBlob(it.result.blob, it.result.name)}>
+                          onClick={() => saveItem(it)}>
                           Скачать
                         </button>
                       )}
@@ -322,7 +307,7 @@ export default function BatchView({ frames, uploading, onFrame, onClearDark, set
               <Button size="sm" onClick={downloadFiles} disabled={!done.length || running}>
                 Скачать по одному
               </Button>
-              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты и processing.json">
+              <Button size="sm" onClick={downloadZip} disabled={!done.length || running} title="Результаты, их журналы и processing.json">
                 Скачать ZIP
               </Button>
             </div>

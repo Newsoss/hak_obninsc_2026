@@ -1,15 +1,17 @@
+import { useRef } from 'react';
 import { DEFAULT_COLOR, PRESETS } from '../lib/presets';
-import { Checkbox, Section, Slider } from './ui';
+import { Button, Checkbox, Section, Slider } from './ui';
 
 const signed = (digits) => (v) => `${v > 0 ? '+' : ''}${v.toFixed(digits)}`;
 
-export default function SettingsPanel({ settings, presetId, onChange, onPreset }) {
+export default function SettingsPanel({ settings, presetId, onChange, onPreset, onSaveProfile, onLoadProfile }) {
+  const fileInput = useRef(null);
   const color = settings.color;
   const setColor = (key) => (value) => onChange({ ...settings, color: { ...color, [key]: value } });
 
   return (
     <div className="space-y-5">
-      <Section title="Пресет">
+      <Section title="Профиль">
         <select
           className="field w-full"
           value={presetId ?? ''}
@@ -25,6 +27,26 @@ export default function SettingsPanel({ settings, presetId, onChange, onPreset }
             </option>
           ))}
         </select>
+        <div className="flex gap-2">
+          <Button size="sm" className="flex-1 justify-center" onClick={() => fileInput.current?.click()}
+            title="Файл профиля или журнал *_ffc.json от сохранённого результата">
+            Загрузить из файла
+          </Button>
+          <Button size="sm" className="flex-1 justify-center" onClick={onSaveProfile}>
+            Сохранить в файл
+          </Button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onLoadProfile(file);
+            e.target.value = '';
+          }}
+        />
       </Section>
 
       <Section title="Коррекция освещения">

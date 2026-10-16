@@ -3,6 +3,7 @@ import { SquareTerminal } from 'lucide-react';
 import { demoFile, exportImage, fetchPreview, uploadFrame } from './api/client';
 import { frameMeta, saveBlob } from './lib/files';
 import { applyPreset, PRESETS } from './lib/presets';
+import { fileLog, jsonBlob, logName, parseProfile, profileJson } from './lib/profile';
 import BatchView from './components/BatchView';
 import CompareViewer from './components/CompareViewer';
 import FrameSlot from './components/FrameSlot';
@@ -150,15 +151,21 @@ export default function App() {
   const download = async () => {
     setExporting(true);
     try {
-      const { blob, name, report } = await exportImage({
+      const result = await exportImage({
         raw_id: frames.raw.id,
         bright_id: frames.bright.id,
         dark_id: frames.dark?.id ?? null,
         settings,
         format: exportFormat || null,
       });
-      saveBlob(blob, name);
-      log(`Сохранено: ${frames.raw.name} → ${name}, ${report?.elapsed_ms?.toFixed(0) ?? '?'} мс. Исходный файл не изменён.`);
+      saveBlob(result.blob, result.name);
+      // Журнал рядом с результатом: из чего и с какими настройками он получен
+      await new Promise((r) => setTimeout(r, 250));
+      saveBlob(jsonBlob(fileLog({ source: frames.raw, result, frames, settings })), logName(result.name));
+      log(
+        `Сохранено: ${frames.raw.name} → ${result.name} и ${logName(result.name)}, ` +
+          `${result.report?.elapsed_ms?.toFixed(0) ?? '?'} мс. Исходный файл не изменён.`,
+      );
     } catch (err) {
       log(`Сохранение: ${err.message}`, 'error');
     } finally {
@@ -174,6 +181,22 @@ export default function App() {
   const choosePreset = (preset) => {
     setSettings(applyPreset(preset));
     setPresetId(preset.id);
+  };
+
+  const saveProfile = () => {
+    saveBlob(jsonBlob(profileJson(settings, presetId)), 'microcleaner-profile.json');
+    log('Профиль сохранён в microcleaner-profile.json');
+  };
+
+  const loadProfile = async (file) => {
+    try {
+      const profile = parseProfile(await file.text());
+      setSettings(profile.settings);
+      setPresetId(PRESETS.some((p) => p.id === profile.presetId) ? profile.presetId : null);
+      log(`Профиль загружен из ${file.name}`);
+    } catch (err) {
+      log(`Не удалось прочитать профиль ${file.name}: ${err.message}`, 'error');
+    }
   };
 
   const openInCompare = (file) => {
@@ -210,7 +233,14 @@ export default function App() {
               <FrameSlot title="Темновой кадр" optional frame={frames.dark} busy={uploading.dark}
                 onFile={(f) => setFrame('dark', f)} onClear={() => setFrames((f) => ({ ...f, dark: null }))} />
             </Section>
-            <SettingsPanel settings={settings} presetId={presetId} onChange={changeSettings} onPreset={choosePreset} />
+            <SettingsPanel
+              settings={settings}
+              presetId={presetId}
+              onChange={changeSettings}
+              onPreset={choosePreset}
+              onSaveProfile={saveProfile}
+              onLoadProfile={loadProfile}
+            />
           </aside>
 
           <section className="order-first flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2 p-3 lg:order-none lg:min-h-0">
