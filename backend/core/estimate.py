@@ -73,25 +73,42 @@ def gaussian_flat(image: np.ndarray, dark=None) -> np.ndarray:
     return _with_dark(cv2.GaussianBlur(background, (0, 0), sigma).astype(np.float32), dark)
 
 
+def pick_series(items: list) -> list:
+    """Равномерная выборка из длинной серии: для оценки хватает, а память не раздувается."""
+    if len(items) <= MAX_SERIES:
+        return list(items)
+    step = len(items) / MAX_SERIES
+    return [items[int(i * step)] for i in range(MAX_SERIES)]
+
+
+def series_frame(image: np.ndarray, dark=None) -> Tuple[np.ndarray, float]:
+    """
+    Снимок серии, подготовленный к оценке: без темнового кадра и уменьшенный.
+    Вместе с ним — соотношение сторон исходника. Сервер готовит снимки по одному
+    сразу после чтения и не держит в памяти всю серию в полном размере.
+    """
+    return _shrink(_without_dark(image, dark), MEDIAN_SIDE), image.shape[1] / image.shape[0]
+
+
 def series_flat(images: List[np.ndarray], dark=None) -> Tuple[np.ndarray, List[str]]:
     """Светлое поле по серии снимков. Возвращает (оценка, предупреждения)."""
     if len(images) < MIN_SERIES:
         raise ValueError(t("est.min_series", min=MIN_SERIES, n=len(images)))
-    warnings: List[str] = []
-    if len(images) > MAX_SERIES:
-        # Равномерная выборка: для оценки хватает, а память не раздувается
-        step = len(images) / MAX_SERIES
-        images = [images[int(i * step)] for i in range(MAX_SERIES)]
+    return series_flat_from_frames([series_frame(img, dark) for img in pick_series(images)], dark)
 
-    first = _shrink(_without_dark(images[0], dark), MEDIAN_SIDE)
+
+def series_flat_from_frames(frames: List[Tuple[np.ndarray, float]], dark=None) -> Tuple[np.ndarray, List[str]]:
+    """Оценка по снимкам, уже подготовленным series_frame."""
+    if len(frames) < MIN_SERIES:
+        raise ValueError(t("est.min_series", min=MIN_SERIES, n=len(frames)))
+    warnings: List[str] = []
+    first, reference_aspect = frames[0]
     h, w = first.shape[:2]
     color = first.ndim == 3
-    reference_aspect = images[0].shape[1] / images[0].shape[0]
     stack = []
-    for img in images:
-        if abs(img.shape[1] / img.shape[0] - reference_aspect) > 0.01:
+    for small, aspect in frames:
+        if abs(aspect - reference_aspect) > 0.01:
             warnings.append(t("est.size_mismatch"))
-        small = _shrink(_without_dark(img, dark), MEDIAN_SIDE)
         if small.shape[:2] != (h, w):
             small = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
         if color and small.ndim == 2:

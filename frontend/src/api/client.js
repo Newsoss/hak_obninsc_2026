@@ -102,11 +102,17 @@ export async function verifyMethod(file) {
 }
 
 /** Светлое поле, оцененное по серии снимков (когда его не снимали). */
+const MAX_SERIES = 64; // сервер больше не использует — незачем гонять лишние файлы
+
 export async function estimateFlat(files, darkId) {
+  const step = Math.max(1, files.length / MAX_SERIES);
+  const picked = files.length > MAX_SERIES ? Array.from({ length: MAX_SERIES }, (_, i) => files[Math.floor(i * step)]) : files;
   const body = new FormData();
-  files.forEach((file) => body.append('files', file));
+  picked.forEach((file) => body.append('files', file));
   if (darkId) body.append('dark_id', darkId); // вычитается из снимков до оценки
-  return (await request('/api/flat/series', { method: 'POST', body })).json();
+  const info = await (await request('/api/flat/series', { method: 'POST', body })).json();
+  // Оценка привязана к темновому кадру: при его смене она устаревает
+  return { ...info, darkId: darkId ?? null };
 }
 
 /** Значения пикселя до/после в исходных единицах. */

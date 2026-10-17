@@ -52,6 +52,10 @@ const DICT = {
 
   // сообщения в логах
   'log.averaging': ['{slot}: усредняю кадров — {n}…', '{slot}: averaging {n} frames…'],
+  'log.estimate_reset': [
+    'Темновой кадр изменился — светлое поле, оцененное по серии, сброшено. Оно пересчитается при обработке',
+    'The dark frame changed, so the bright field estimated from the series was reset. It will be re-estimated on processing',
+  ],
   'log.pixel_size': [', пиксель {size}', ', pixel {size}'],
   'log.frames': ['кадров: {n}', '{n} frames'],
   'log.processed': ['Обработка {name}: {ms} мс', 'Processed {name}: {ms} ms'],

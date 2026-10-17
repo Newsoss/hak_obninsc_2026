@@ -237,12 +237,20 @@ async def estimate_flat_from_series(
     """
     _check_count(files)
     dark = _frame(dark_id, t("label.dark"))
-    images = [(await _read(f))[0] for f in files]
+    dark_image = dark.image if dark else None
+    if len(files) < estimate.MIN_SERIES:
+        raise HTTPException(400, t("est.min_series", min=estimate.MIN_SERIES, n=len(files)))
+    # Снимки читаются по одному и сразу уменьшаются: вся серия в полном размере в память не попадает
+    frames = []
+    for f in estimate.pick_series(files):
+        image = (await _read(f))[0]
+        frames.append(await run_in_threadpool(estimate.series_frame, image, dark_image))
+        del image
     try:
-        flat, checks = await run_in_threadpool(estimate.series_flat, images, dark.image if dark else None)
+        flat, checks = await run_in_threadpool(estimate.series_flat_from_frames, frames, dark_image)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
-    count = min(len(images), estimate.MAX_SERIES)
+    count = len(frames)
     note = t("est.series_note", count=count)
     frame = store.put(
         t("est.frame_series", count=count),

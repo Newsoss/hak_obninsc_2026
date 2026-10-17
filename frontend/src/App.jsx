@@ -76,6 +76,17 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleLog]);
 
+  // Светлое поле, оцененное по серии, считалось с конкретным темновым кадром.
+  // Сменили или убрали темновой — оценка уже не сходится с ним, ее надо пересчитать.
+  const darkId = frames.dark?.id ?? null;
+  useEffect(() => {
+    const bright = frames.bright;
+    if (bright?.estimated?.method === 'series' && bright.darkId !== darkId) {
+      setFrames((f) => ({ ...f, bright: null }));
+      log(t('log.estimate_reset'), 'warn');
+    }
+  }, [darkId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
     try {
