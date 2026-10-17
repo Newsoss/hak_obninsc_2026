@@ -1,6 +1,7 @@
 import io
 import json
 import zipfile
+from functools import lru_cache
 
 import numpy as np
 import pytest
@@ -8,9 +9,16 @@ import tifffile
 from fastapi.testclient import TestClient
 
 from adapters import image_io
+from core import demo
 from main import app
 
 client = TestClient(app)
+
+
+@lru_cache(maxsize=16)
+def demo_png(name: str) -> bytes:
+    """Синтетический кадр (bright, dark, sample-N) в PNG — как файл, который загрузил бы пользователь."""
+    return image_io.encode_image(demo.generate(name), "png")[0]
 
 
 def upload(content: bytes, name: str) -> dict:
@@ -23,7 +31,7 @@ def upload(content: bytes, name: str) -> dict:
 def demo_ids():
     ids = {}
     for name in ("bright", "dark", "sample-1"):
-        png = client.get(f"/api/demo/{name}.png").content
+        png = demo_png(f"{name}")
         ids[name] = upload(png, f"{name}.png")["id"]
     return ids
 
@@ -73,8 +81,8 @@ def test_sixteen_bit_tiff_roundtrip():
 
 
 def test_batch_zip_contents():
-    bright = client.get("/api/demo/bright.png").content
-    samples = [client.get(f"/api/demo/sample-{i}.png").content for i in (1, 2, 3)]
+    bright = demo_png("bright")
+    samples = [demo_png(f"sample-{i}") for i in (1, 2, 3)]
     files = [("raw_images", (f"s{i}.png", data)) for i, data in enumerate(samples)]
     files += [("raw_images", ("broken.png", b"not an image")), ("bright_image", ("bright.png", bright))]
     response = client.post("/api/process/batch", files=files, data={"settings": '{"neutralize_color": true}'})
@@ -91,7 +99,6 @@ def test_errors_are_readable():
     assert client.post("/api/frames", files={"file": ("x.gif", b"GIF89a")}).status_code == 400
     response = client.post("/api/process/preview", json={"raw_id": "nope", "bright_id": "nope"})
     assert response.status_code == 404
-    assert client.get("/api/demo/unknown.png").status_code == 404
 
 
 def test_export_is_byte_identical_and_documented(demo_ids):
@@ -110,8 +117,8 @@ def test_export_is_byte_identical_and_documented(demo_ids):
 
 
 def test_batch_contains_processing_log():
-    bright = client.get("/api/demo/bright.png").content
-    files = [("raw_images", (f"s{i}.png", client.get(f"/api/demo/sample-{i}.png").content)) for i in (1, 2, 3)]
+    bright = demo_png("bright")
+    files = [("raw_images", (f"s{i}.png", demo_png(f"sample-{i}"))) for i in (1, 2, 3)]
     files.append(("bright_image", ("bright.png", bright)))
     archive = zipfile.ZipFile(io.BytesIO(client.post("/api/process/batch", files=files).content))
     log = json.loads(archive.read("processing.json"))
@@ -136,8 +143,8 @@ def test_crop_full_resolution(demo_ids):
 
 
 def test_calibration_checks_on_upload():
-    bright = client.get("/api/demo/bright.png").content
-    sample = client.get("/api/demo/sample-1.png").content
+    bright = demo_png("bright")
+    sample = demo_png("sample-1")
     ok = client.post("/api/frames?role=bright", files={"file": ("bright.png", bright)}).json()
     assert ok["checks"] == []
     wrong = client.post("/api/frames?role=bright", files={"file": ("sample.png", sample)}).json()
@@ -173,7 +180,7 @@ def test_tiff_metadata_is_preserved():
 
 
 def test_batch_file_thumbnails(demo_ids):
-    sample = client.get("/api/demo/sample-2.png").content
+    sample = demo_png("sample-2")
     response = client.post(
         "/api/process/file",
         files={"raw": ("s2.png", sample)},
@@ -181,40 +188,6 @@ def test_batch_file_thumbnails(demo_ids):
     )
     thumbs = client.get(f"/api/thumbs/{response.headers['x-thumbs-id']}").json()
     assert thumbs["before"].startswith("data:image/jpeg") and thumbs["after"].startswith("data:image/jpeg")
-
-
-def test_demo_from_own_files(tmp_path, monkeypatch):
-    bright = image_io.encode_image(np.full((30, 40), 200, np.uint8), "png")[0]
-    raw = image_io.encode_image(np.full((30, 40), 100, np.uint16), "tiff")[0]
-    (tmp_path / "bright.png").write_bytes(bright)
-    (tmp_path / "cells.tif").write_bytes(raw)
-    (tmp_path / "notes.txt").write_text("не снимок")
-    monkeypatch.setenv("DEMO_DIR", str(tmp_path))
-    items = {i["name"]: i for i in client.get("/api/demo").json()}
-    assert set(items) == {"bright", "sample-1"}
-    assert items["sample-1"]["filename"] == "cells.tif" and items["sample-1"]["source"] == "files"
-    response = client.get("/api/demo/sample-1")
-    assert response.content == raw and response.headers["content-type"] == "image/tiff"
-
-
-def test_demo_from_specimens_gets_synthetic_light(tmp_path, monkeypatch):
-    specimen = np.full((300, 500, 3), 240, np.uint8)
-    for y in range(20, 300, 40):  # мелкие «клетки» по всему полю, фон ровный
-        for x in range(20, 500, 40):
-            specimen[y : y + 8, x : x + 8] = (180, 60, 140)
-    (tmp_path / "specimens").mkdir()
-    (tmp_path / "specimens" / "tissue.jpg").write_bytes(image_io.encode_image(specimen, "jpeg")[0])
-    monkeypatch.setenv("DEMO_DIR", str(tmp_path))
-    items = {i["name"]: i for i in client.get("/api/demo").json()}
-    assert set(items) == {"bright", "dark", "sample-1"} and items["sample-1"]["source"] == "specimens"
-    ids = {n: upload(client.get(f"/api/demo/{n}").content, f"{n}.png")["id"] for n in items}
-    body = client.post(
-        "/api/process/preview",
-        json={"raw_id": ids["sample-1"], "bright_id": ids["bright"], "dark_id": ids["dark"], "settings": {"color": {}}},
-    ).json()
-    # Искусственная засветка убирается почти полностью
-    assert body["metrics"]["before"]["nonuniformity"] > 15
-    assert body["metrics"]["after"]["nonuniformity"] < 3
 
 
 def test_preview_and_export_without_bright_field(demo_ids):

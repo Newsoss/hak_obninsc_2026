@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { zipSync } from 'fflate';
-import { demoCatalog, demoFile, estimateFlat, fetchThumbs, processFile } from '../api/client';
+import { estimateFlat, fetchThumbs, processFile } from '../api/client';
 import { contactSheet } from '../lib/canvas';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
@@ -129,15 +129,6 @@ export default function BatchView({
       if (it?.thumb) URL.revokeObjectURL(it.thumb);
       return list.filter((x) => x.id !== id);
     });
-
-  const loadDemo = async () => {
-    try {
-      const samples = (await demoCatalog()).filter((i) => i.name.startsWith('sample-'));
-      addFiles(await Promise.all(samples.map(demoFile)), 'примеры');
-    } catch (err) {
-      log(`Примеры не загрузились: ${err.message}`, 'error');
-    }
-  };
 
   /** Светлое поле как медиана по снимкам серии — когда его не снимали. */
   const estimateFromSeries = async () => {
@@ -326,9 +317,6 @@ export default function BatchView({
           <Button size="sm" onClick={() => folderInput.current?.click()} disabled={running}
             title="Все снимки из папки, включая вложенные">
             Добавить папку
-          </Button>
-          <Button size="sm" onClick={loadDemo} disabled={running}>
-            Добавить примеры
           </Button>
           {running ? (
             <Button size="sm" onClick={() => { stopRef.current = true; }}>

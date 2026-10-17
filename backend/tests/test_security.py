@@ -22,12 +22,12 @@ def png(value=128, size=(32, 32)):
 
 def test_password_protects_site_and_api(client, monkeypatch):
     monkeypatch.setattr(config, "ACCESS_PASSWORD", "secret")
-    assert client.get("/api/demo").status_code == 401
+    assert client.get("/openapi.json").status_code == 401
     assert client.get("/api/health").status_code == 200  # мониторинг без пароля
     token = base64.b64encode(b"lab:secret").decode()
-    assert client.get("/api/demo", headers={"Authorization": f"Basic {token}"}).status_code == 200
+    assert client.get("/openapi.json", headers={"Authorization": f"Basic {token}"}).status_code == 200
     wrong = base64.b64encode(b"lab:nope").decode()
-    assert client.get("/api/demo", headers={"Authorization": f"Basic {wrong}"}).status_code == 401
+    assert client.get("/openapi.json", headers={"Authorization": f"Basic {wrong}"}).status_code == 401
 
 
 def test_rate_limit(client, monkeypatch):
@@ -58,4 +58,4 @@ def test_heavy_concurrency_limit(client, monkeypatch):
     monkeypatch.setattr(config, "HEAVY_PER_CLIENT", 0)
     busy = client.post("/api/frames", files={"file": ("a.png", png())})
     assert busy.status_code == 429 and busy.headers["retry-after"] == "1"
-    assert client.get("/api/demo").status_code == 200
+    assert client.get("/api/thumbs/unknown").status_code == 404  # легкий запрос не упирается в лимит

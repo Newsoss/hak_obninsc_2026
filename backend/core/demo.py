@@ -121,12 +121,6 @@ def specimen_from_image(image: np.ndarray) -> np.ndarray:
     return np.clip(img / max(white, 1e-6), 0.02, 1.0)
 
 
-def sample_from_image(image: np.ndarray, seed: int = 1) -> np.ndarray:
-    """Снимок препарата с искусственной засветкой — пара к generate('bright'/'dark')."""
-    light = BRIGHT_LEVEL * _optics() * specimen_from_image(image)
-    return _to_u8(_dark(np.random.default_rng(11)) + light, np.random.default_rng(200 + seed))
-
-
 def builtin_specimen(seed: int = 1) -> np.ndarray:
     """Встроенный препарат (пропускание 0..1) для проверки метода."""
     return _specimen(seed)
@@ -162,9 +156,3 @@ def generate(name: str) -> np.ndarray:
             light = BRIGHT_LEVEL * optics * _specimen(index)
             return _to_u8(dark + light, np.random.default_rng(20 + index))
     raise KeyError(name)
-
-
-def catalog() -> Dict[str, str]:
-    items = {"bright": "Светлое поле", "dark": "Темновой кадр"}
-    items.update({f"sample-{i}": f"Препарат №{i}" for i in range(1, SAMPLE_COUNT + 1)})
-    return items

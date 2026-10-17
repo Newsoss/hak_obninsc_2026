@@ -3,8 +3,6 @@ import { SquareTerminal } from 'lucide-react';
 import {
   averageFrames,
   cropRegion,
-  demoCatalog,
-  demoFile,
   exportImage,
   fetchPreview,
   probePixel,
@@ -54,7 +52,6 @@ export default function App() {
   const [pixel, setPixel] = useState(null);
   const [exportFormat, setExportFormat] = useState('');
   const [exporting, setExporting] = useState(false);
-  const [demoBusy, setDemoBusy] = useState(false);
   const [batchCount, setBatchCount] = useState(0);
   const [logs, setLogs] = useState([]);
   const [logOpen, setLogOpen] = useState(false);
@@ -129,30 +126,6 @@ export default function App() {
     },
     [log],
   );
-
-  const loadDemo = async () => {
-    setDemoBusy(true);
-    try {
-      const items = await demoCatalog();
-      const find = (name) => items.find((i) => i.name === name);
-      const sample = items.find((i) => i.name.startsWith('sample-'));
-      if (!sample || !find('bright')) throw new Error('в demo_data нет снимка или светлого поля');
-      log(`Пример: ${items[0].source_title}`);
-      const [raw, bright, darkFrame] = await Promise.all(
-        [sample, find('bright'), find('dark')].map((item) => (item ? demoFile(item) : null)),
-      );
-      await Promise.all([
-        setFrame('raw', raw),
-        setFrame('bright', bright),
-        darkFrame ? setFrame('dark', darkFrame) : setFrames((f) => ({ ...f, dark: null })),
-      ]);
-      setTab((t) => (t === 'method' ? 'single' : t));
-    } catch (err) {
-      log(`Пример не загрузился: ${err.message}`, 'error');
-    } finally {
-      setDemoBusy(false);
-    }
-  };
 
   const settingsKey = JSON.stringify(settings);
   const refs = useMemo(
@@ -355,7 +328,7 @@ export default function App() {
   const ready = Boolean(frames.raw);
   const emptyHint = frames.bright
     ? 'Загрузите снимок препарата.'
-    : 'Загрузите снимок и светлое поле слева или откройте пример. Без светлого поля коррекция будет приблизительной.';
+    : 'Загрузите снимок и светлое поле слева. Без светлого поля коррекция будет приблизительной.';
 
   const status = useMemo(() => {
     if (tab !== 'single' || !preview) return '';
@@ -376,8 +349,6 @@ export default function App() {
         batchCount={batchCount}
         dark={dark}
         onTheme={() => setDark((d) => !d)}
-        onDemo={loadDemo}
-        demoBusy={demoBusy}
       />
 
       {tab === 'single' && (
@@ -387,7 +358,7 @@ export default function App() {
               <FrameSlot title="Снимок" frame={frames.raw} busy={uploading.raw} onFile={(f) => setFrame('raw', f)} />
               <FrameSlot title="Светлое поле" frame={frames.bright} busy={uploading.bright}
                 multiple
-                emptyText="Можно несколько кадров. Без него — приблизительная оценка"
+                emptyText="Можно несколько кадров."
                 onFile={(f) => setFrame('bright', f)} onClear={() => setFrames((f) => ({ ...f, bright: null }))} />
               <FrameSlot title="Темновой кадр" optional multiple frame={frames.dark} busy={uploading.dark}
                 onFile={(f) => setFrame('dark', f)} onClear={() => setFrames((f) => ({ ...f, dark: null }))} />

@@ -83,12 +83,3 @@ class PreviewResponse(BaseModel):
     metrics: Dict[str, Uniformity]
     warnings: List[str] = []
     approximate: Optional[str] = Field(None, description="Пояснение, если светлое поле оценено, а не снято")
-
-
-class DemoItem(BaseModel):
-    name: str
-    title: str
-    filename: str
-    source: str = Field(..., description="files | specimens | synthetic")
-    source_title: str
-    url: str

@@ -7,7 +7,7 @@ const TABS = [
   { value: 'method', label: 'О методе' },
 ];
 
-export default function Header({ tab, onTab, batchCount, dark, onTheme, onDemo, demoBusy }) {
+export default function Header({ tab, onTab, batchCount, dark, onTheme }) {
   return (
     <header className="shrink-0 border-b border-line bg-surface">
       <div className="flex h-12 items-stretch gap-3 px-3 sm:gap-5 sm:px-4">
@@ -33,10 +33,6 @@ export default function Header({ tab, onTab, batchCount, dark, onTheme, onDemo, 
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" onClick={onDemo} busy={demoBusy}>
-            <span className="sm:hidden">Пример</span>
-            <span className="hidden sm:inline">Открыть пример</span>
-          </Button>
           <Button
             variant="ghost"
             size="icon"

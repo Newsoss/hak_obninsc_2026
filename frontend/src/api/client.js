@@ -119,13 +119,3 @@ export async function processFile(file, { brightId, darkId, settings, format, th
 export async function fetchThumbs(id) {
   return (await request(`/api/thumbs/${id}`)).json();
 }
-
-/** Состав примера: [{ name, title, filename, source, source_title, url }]. */
-export async function demoCatalog() {
-  return (await request('/api/demo')).json();
-}
-
-export async function demoFile(item) {
-  const blob = await (await request(item.url)).blob();
-  return new File([blob], item.filename, { type: blob.type });
-}

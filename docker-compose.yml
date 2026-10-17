@@ -8,7 +8,4 @@ services:
     env_file:
       - path: .env
         required: false
-    volumes:
-      # Свой пример для кнопки «Открыть пример» — меняется без пересборки образа
-      - ./backend/demo_data:/app/demo_data:ro
     restart: unless-stopped

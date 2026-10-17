@@ -16,14 +16,13 @@ from core.calibration import check_frame, temporal_noise
 from schemas.processing import (
     CorrectionSettings,
     CropRequest,
-    DemoItem,
     ExportRequest,
     FrameInfo,
     FrameRefs,
     PreviewResponse,
     ProbeRequest,
 )
-from services import demo_data, verify
+from services import verify
 from services.correction import CorrectionService, sha256, thumbnail
 from services.frame_store import Frame, FrameStore
 
@@ -357,37 +356,4 @@ async def process_batch(
         archive,
         media_type="application/zip",
         headers={"Content-Disposition": _attachment("microcleaner_batch.zip")},
-    )
-
-
-@router.get("/demo", response_model=List[DemoItem], tags=["Demo"])
-def demo_catalog():
-    """Состав примера: готовый набор из demo_data, свои снимки с засветкой или встроенный синтетический."""
-    return [
-        DemoItem(
-            name=item.name,
-            title=item.title,
-            filename=item.filename,
-            source=item.source,
-            source_title=demo_data.SOURCES[item.source],
-            url=f"/api/demo/{item.name}",
-        )
-        for item in demo_data.catalog().values()
-    ]
-
-
-@router.get("/demo/{name}", tags=["Demo"])
-def demo_image(name: str):
-    """Файл примера: bright, dark или sample-N (расширение в имени можно не указывать)."""
-    item = demo_data.catalog().get(name.rsplit(".", 1)[0] if "." in name else name)
-    if item is None:
-        raise HTTPException(404, "Нет такого файла примера")
-    try:
-        data = item.load()
-    except (OSError, ValueError) as exc:
-        raise HTTPException(500, f"Не удалось прочитать пример {item.filename}: {exc}") from None
-    return Response(
-        data,
-        media_type=image_io.mime_for(item.filename),
-        headers={"Content-Disposition": _attachment(item.filename), "Cache-Control": "no-cache"},
     )
