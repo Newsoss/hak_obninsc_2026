@@ -1,6 +1,8 @@
 import { translate } from '../i18n';
 
-const BASE = import.meta.env.VITE_API_URL ?? '';
+// Пути запросов уже начинаются с /api, поэтому здесь только адрес сервера.
+// В dev (npm run dev) запросы идут через прокси Vite на локальный бэкенд.
+const BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? 'https://microcleaner.duckdns.org' : '');
 
 // Язык интерфейса — сервер отвечает на нем (предупреждения, ошибки, журнал)
 let apiLanguage = 'ru';
@@ -100,9 +102,10 @@ export async function verifyMethod(file) {
 }
 
 /** Светлое поле, оцененное по серии снимков (когда его не снимали). */
-export async function estimateFlat(files) {
+export async function estimateFlat(files, darkId) {
   const body = new FormData();
   files.forEach((file) => body.append('files', file));
+  if (darkId) body.append('dark_id', darkId); // вычитается из снимков до оценки
   return (await request('/api/flat/series', { method: 'POST', body })).json();
 }
 

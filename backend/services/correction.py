@@ -304,7 +304,7 @@ class CorrectionService:
                     if meta:
                         source["metadata"] = meta
                     if per_image:
-                        file_profile = self.profile(None, estimate.gaussian_flat(raw), dark, settings)
+                        file_profile = self.profile(None, estimate.gaussian_flat(raw, dark), dark, settings)
                     result = self.correct(raw, file_profile if per_image else profile, settings)
                     out_fmt = fmt or image_io.format_for(name)
                     bright_log = estimated if per_image else calibration["bright_field"]

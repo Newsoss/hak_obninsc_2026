@@ -2,10 +2,32 @@ services:
   app:
     build: .
     container_name: microcleaner
-    ports:
-      - "80:8000"
+    # Наружу не открыт: к нему ходит только caddy по внутренней сети
+    expose:
+      - "8000"
     # Лимиты и пароль — см. .env.example. Пароль: ACCESS_PASSWORD=... в файле .env рядом
     env_file:
       - path: .env
         required: false
     restart: unless-stopped
+
+  # HTTPS: сертификат Let's Encrypt, http -> https
+  caddy:
+    image: caddy:2
+    container_name: microcleaner-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-microcleaner.duckdns.org}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

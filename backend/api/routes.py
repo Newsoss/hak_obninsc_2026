@@ -48,23 +48,24 @@ def _frame(frame_id: Optional[str], label: str) -> Optional[Frame]:
         raise HTTPException(404, t("err.not_found", label=label)) from None
 
 
-def _estimated_flat(image, key: str) -> Frame:
+def _estimated_flat(image, key: str, dark=None) -> Frame:
     """Светлое поле, оцененное по самому снимку размытием (приблизительно)."""
     return Frame(
         id=f"gauss-{key}",
         name=t("est.frame_gaussian"),
-        image=estimate.gaussian_flat(image),
+        image=estimate.gaussian_flat(image, dark),
         meta={"estimated": {"method": "gaussian", "note": t("est.gaussian_note")}},
     )
 
 
-def _pseudo_flat(raw: Frame) -> Frame:
-    """Светлое поле, оцененное по загруженному снимку. Считается один раз на снимок."""
-    if raw.id in _pseudo_flats:
-        _pseudo_flats.move_to_end(raw.id)
-        return _pseudo_flats[raw.id]
-    flat = _estimated_flat(raw.image, raw.id)
-    _pseudo_flats[raw.id] = flat
+def _pseudo_flat(raw: Frame, dark: Optional[Frame]) -> Frame:
+    """Светлое поле, оцененное по загруженному снимку. Считается один раз на (снимок, темновой кадр)."""
+    key = f"{raw.id}-{dark.id if dark else 'nodark'}"
+    if key in _pseudo_flats:
+        _pseudo_flats.move_to_end(key)
+        return _pseudo_flats[key]
+    flat = _estimated_flat(raw.image, key, dark.image if dark else None)
+    _pseudo_flats[key] = flat
     while len(_pseudo_flats) > 16:
         _pseudo_flats.popitem(last=False)
     return flat
@@ -76,8 +77,8 @@ def _estimated(frame: Optional[Frame]) -> Optional[dict]:
 
 def _refs(req: FrameRefs):
     raw = _frame(req.raw_id, t("label.raw"))
-    bright = _frame(req.bright_id, t("label.bright")) if req.bright_id else _pseudo_flat(raw)
     dark = _frame(req.dark_id, t("label.dark"))
+    bright = _frame(req.bright_id, t("label.bright")) if req.bright_id else _pseudo_flat(raw, dark)
     key = (bright.id, dark.id if dark else None)
     return raw, bright, dark, key
 
@@ -228,15 +229,17 @@ async def verify_method(
 @router.post("/flat/series", response_model=FrameInfo, tags=["Frames"])
 async def estimate_flat_from_series(
     files: List[UploadFile] = File(..., description=f"Снимки серии, минимум {estimate.MIN_SERIES}"),
+    dark_id: Optional[str] = Form(None, description="id темнового кадра — вычитается из снимков до оценки"),
 ):
     """
     Оценивает светлое поле по серии снимков разных полей зрения (фоновое значение в каждой точке).
     Нужна, когда светлое поле не снимали. Результат — обычный кадр с id для обработки серии.
     """
     _check_count(files)
+    dark = _frame(dark_id, t("label.dark"))
     images = [(await _read(f))[0] for f in files]
     try:
-        flat, checks = await run_in_threadpool(estimate.series_flat, images)
+        flat, checks = await run_in_threadpool(estimate.series_flat, images, dark.image if dark else None)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     count = min(len(images), estimate.MAX_SERIES)
@@ -309,11 +312,12 @@ async def process_file(
     без него светлое поле оценивается по каждому снимку отдельно.
     """
     image, source, meta = await _read(raw)
+    dark = _frame(dark_id, t("label.dark"))
     if bright_id:
         bright = _frame(bright_id, t("label.bright"))
     else:
-        bright = await run_in_threadpool(_estimated_flat, image, source["sha256"])
-    dark = _frame(dark_id, t("label.dark"))
+        key = f"{source['sha256']}-{dark.id if dark else 'nodark'}"
+        bright = await run_in_threadpool(_estimated_flat, image, key, dark.image if dark else None)
     if format not in (None, "", *image_io.FORMATS):
         raise HTTPException(422, t("err.format", fmt=format))
     provenance = {"source": source, "bright_field": _info(bright), "dark_field": _info(dark)}

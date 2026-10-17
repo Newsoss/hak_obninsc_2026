@@ -418,7 +418,7 @@ export default function App() {
                   1:1
                 </Button>
               </div>
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
                 {dirty && <span className="text-xs text-warn">{t('process.dirty')}</span>}
                 <Button
                   variant={dirty ? 'primary' : 'secondary'}

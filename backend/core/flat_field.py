@@ -89,9 +89,12 @@ def build_profile(
         False — нормировка по каналам, исходный баланс белого сохраняется.
     """
     flat = finite(bright)
-    dark_f = match_geometry(finite(dark), flat.shape) if dark is not None else None
-    if dark_f is not None:
-        flat = flat - dark_f
+    # Темновой кадр нужен дважды: в размере светлого поля — чтобы вычесть его из поля,
+    # и в исходном размере — чтобы вычесть из снимка. Если поле уменьшено (оценка),
+    # уменьшенный темновой кадр размазал бы горячие пиксели, и они остались бы на снимке.
+    dark_full = finite(dark) if dark is not None else None
+    if dark_full is not None:
+        flat = flat - match_geometry(dark_full, flat.shape)
 
     if smoothing > 0:
         flat = cv2.GaussianBlur(flat, (0, 0), sigmaX=float(smoothing))
@@ -106,7 +109,7 @@ def build_profile(
         m = flat.mean()
 
     gain = (m / flat).astype(np.float32)
-    return FlatProfile(gain=gain, dark=dark_f)
+    return FlatProfile(gain=gain, dark=dark_full)
 
 
 def apply_profile(raw: np.ndarray, profile: FlatProfile) -> np.ndarray:

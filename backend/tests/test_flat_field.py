@@ -174,3 +174,55 @@ def test_series_flat_has_no_cell_ghosts():
     corrected *= np.median(real) / np.median(corrected)
     worst = np.percentile(np.abs(corrected - real), 99.9) / 255 * 100
     assert worst < 8
+
+
+def _hot_pixel_error(corrected, truth, hot):
+    corrected = corrected * (np.median(truth) / np.median(corrected))
+    return float(np.abs(corrected - truth)[hot].mean()) / 255 * 100
+
+
+def test_estimates_with_dark_frame_remove_hot_pixels():
+    # Оценка светлого поля уменьшена; темновой кадр должен вычитаться из снимка в полном
+    # разрешении, иначе горячие пиксели размазываются и остаются (было 38–48% ошибки)
+    from core import estimate
+    from core.flat_field import apply_profile, build_profile, to_luminance
+
+    light = demo.BRIGHT_LEVEL * demo._optics()
+    dark = demo.generate("dark")
+    hot = to_luminance(dark) > 30
+    series = _series(8)
+    truth = demo._specimen(1) * float(light.mean())
+
+    real = apply_profile(series[0], build_profile(demo.generate("bright"), dark))
+    single = apply_profile(series[0], build_profile(estimate.gaussian_flat(series[0], dark), dark))
+    from_series = apply_profile(series[0], build_profile(estimate.series_flat(series, dark)[0], dark))
+    assert _hot_pixel_error(real, truth, hot) < 2
+    assert _hot_pixel_error(single, truth, hot) < 3
+    assert _hot_pixel_error(from_series, truth, hot) < 3
+
+
+def test_series_flat_handles_sparse_cells_and_exposure():
+    # Редкие клетки: направление объектов определяется по хвостам, а не по медиане.
+    # Разная экспозиция: снимки выравниваются перед оценкой.
+    from core import estimate
+    from core.flat_field import apply_profile, build_profile
+
+    optics, dark = demo._optics(), demo._dark(np.random.default_rng(11))
+    light = demo.BRIGHT_LEVEL * optics
+    rng = np.random.default_rng(3)
+    specimens, shots = [], []
+    for i in range(6):
+        T = np.ones((demo.HEIGHT, demo.WIDTH, 3), np.float32)
+        for _ in range(3):
+            centre = (int(rng.integers(0, demo.WIDTH)), int(rng.integers(0, demo.HEIGHT)))
+            demo._stain(T, centre, (30, 22), 0.0, (0.9, 0.55, 0.75), 1.6)
+        exposure = float(rng.uniform(0.75, 1.25))
+        specimens.append(T)
+        shots.append((demo._to_u8(dark + light * T * exposure, np.random.default_rng(i)), exposure))
+    dark_frame = demo.generate("dark")
+    flat, _ = estimate.series_flat([s for s, _ in shots], dark_frame)
+    corrected = apply_profile(shots[0][0], build_profile(flat, dark_frame)) / shots[0][1]
+    truth = specimens[0] * float(light.mean())
+    corrected *= np.median(truth) / np.median(corrected)
+    assert metrics.uniformity(np.clip(corrected, 0, 255))["nonuniformity"] < 4
+    assert np.percentile(np.abs(corrected - truth), 99.9) / 255 * 100 < 8

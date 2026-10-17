@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from core.calibration import STRUCTURE_LIMIT, structure_fraction
-from core.flat_field import finite, to_luminance
+from core.flat_field import finite, match_geometry, to_luminance
 from i18n import t
 
 GAUSSIAN_SIDE = 768
@@ -42,9 +42,24 @@ def _shrink(image: np.ndarray, side: int) -> np.ndarray:
     return img
 
 
-def gaussian_flat(image: np.ndarray) -> np.ndarray:
+def _without_dark(image: np.ndarray, dark) -> np.ndarray:
+    if dark is None:
+        return finite(image)
+    return np.maximum(finite(image) - match_geometry(finite(dark), image.shape), 0)
+
+
+def _with_dark(flat: np.ndarray, dark) -> np.ndarray:
+    """
+    Оценка строится по снимкам без темнового кадра, а хранится «как снятое светлое поле»:
+    к ней прибавляется темновой кадр в ее (уменьшенном) размере. Дальше профиль вычитает
+    ровно его же и получает точную оценку — без горячих пикселей и полос матрицы.
+    """
+    return flat if dark is None else flat + match_geometry(finite(dark), flat.shape)
+
+
+def gaussian_flat(image: np.ndarray, dark=None) -> np.ndarray:
     """Псевдо светлое поле по одному снимку (уменьшенное, float32)."""
-    small = _shrink(image, GAUSSIAN_SIDE)
+    small = _shrink(_without_dark(image, dark), GAUSSIAN_SIDE)
     sigma = max(small.shape[:2]) * GAUSSIAN_SIGMA_FRACTION
     background = small
     for _ in range(3):
@@ -55,10 +70,10 @@ def gaussian_flat(image: np.ndarray) -> np.ndarray:
         if small.ndim == 3:
             objects = objects[..., None]
         background = np.where(objects, blur, small)
-    return cv2.GaussianBlur(background, (0, 0), sigma).astype(np.float32)
+    return _with_dark(cv2.GaussianBlur(background, (0, 0), sigma).astype(np.float32), dark)
 
 
-def series_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
+def series_flat(images: List[np.ndarray], dark=None) -> Tuple[np.ndarray, List[str]]:
     """Светлое поле по серии снимков. Возвращает (оценка, предупреждения)."""
     if len(images) < MIN_SERIES:
         raise ValueError(t("est.min_series", min=MIN_SERIES, n=len(images)))
@@ -68,7 +83,7 @@ def series_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
         step = len(images) / MAX_SERIES
         images = [images[int(i * step)] for i in range(MAX_SERIES)]
 
-    first = _shrink(images[0], MEDIAN_SIDE)
+    first = _shrink(_without_dark(images[0], dark), MEDIAN_SIDE)
     h, w = first.shape[:2]
     color = first.ndim == 3
     reference_aspect = images[0].shape[1] / images[0].shape[0]
@@ -76,7 +91,7 @@ def series_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
     for img in images:
         if abs(img.shape[1] / img.shape[0] - reference_aspect) > 0.01:
             warnings.append(t("est.size_mismatch"))
-        small = _shrink(img, MEDIAN_SIDE)
+        small = _shrink(_without_dark(img, dark), MEDIAN_SIDE)
         if small.shape[:2] != (h, w):
             small = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
         if color and small.ndim == 2:
@@ -88,12 +103,21 @@ def series_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
     stack = np.stack(stack)
     lum = to_luminance(stack) if color else stack
     middle = np.median(lum, axis=0)
-    # Объекты темнее фона (светлое поле) или светлее (флуоресценция)? Смотрим, в какую
-    # сторону от медианы распределение по снимкам «вытянуто» сильнее.
-    dark_objects = np.median(middle - lum.min(axis=0)) >= np.median(lum.max(axis=0) - middle)
+    # Объекты темнее фона (светлое поле) или светлее (флуоресценция)? Смотрим на хвосты:
+    # там, где есть объекты, значения уходят далеко от медианы в одну сторону. По медиане
+    # разброса решать нельзя — при редких клетках почти весь кадр фон, и решение случайно.
+    dark_objects = np.percentile(middle - lum.min(axis=0), 99) >= np.percentile(lum.max(axis=0) - middle, 99)
+
+    # Выравниваем экспозицию: если камера подбирала выдержку сама, снимки разной яркости
+    # смешались бы в одной точке. Уровень фона — светлые значения для светлого поля,
+    # темные — для флуоресценции.
+    levels = np.array([np.percentile(frame, 90 if dark_objects else 10) for frame in lum])
+    levels = np.maximum(levels, 1e-6)
+    stack = stack * (levels.mean() / levels).reshape(-1, *([1] * (stack.ndim - 1)))
+
     rank = len(stack) - 2 if dark_objects else 1
     flat = np.sort(stack, axis=0)[rank].astype(np.float32)
-    flat = cv2.GaussianBlur(flat, (0, 0), 1.0)
+    flat = _with_dark(cv2.GaussianBlur(flat, (0, 0), 1.0), dark)
 
     count = len(stack)
     if count < RELIABLE_SERIES:

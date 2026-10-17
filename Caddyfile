@@ -1,0 +1,6 @@
+# Caddy сам получает и продлевает сертификат Let's Encrypt
+# и перенаправляет http:// на https://
+{$DOMAIN:microcleaner.duckdns.org} {
+	encode gzip
+	reverse_proxy app:8000
+}

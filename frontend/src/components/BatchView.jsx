@@ -141,7 +141,7 @@ export default function BatchView({
     setEstimating(true);
     log(t('batch.log_estimating', { n: files.length }));
     try {
-      const info = await estimateFlat(files);
+      const info = await estimateFlat(files, frames.dark?.id);
       onFrameInfo('bright', info);
       return info;
     } catch (err) {
