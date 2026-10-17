@@ -1,3 +1,5 @@
+import { translate } from '../i18n';
+
 export const ACCEPT = '.tif,.tiff,.png,.jpg,.jpeg,.bmp';
 
 export function isImageFile(file) {
@@ -21,13 +23,13 @@ export function saveBlob(blob, name) {
 }
 
 export function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} КБ`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} МБ`;
+  if (bytes < 1024) return translate('files.b', { n: bytes });
+  if (bytes < 1024 ** 2) return translate('files.kb', { n: (bytes / 1024).toFixed(0) });
+  return translate('files.mb', { n: (bytes / 1024 ** 2).toFixed(1) });
 }
 
 export function frameMeta(frame) {
   if (!frame) return '';
-  const depth = frame.dtype === 'float32' ? '32 бит float' : `${frame.bit_depth} бит`;
-  return `${frame.width}×${frame.height}, ${depth}${frame.channels === 1 ? ', ч/б' : ''}`;
+  const depth = frame.dtype === 'float32' ? translate('files.float') : translate('files.bits', { n: frame.bit_depth });
+  return `${frame.width}×${frame.height}, ${depth}${frame.channels === 1 ? translate('files.mono') : ''}`;
 }

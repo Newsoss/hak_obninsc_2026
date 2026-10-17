@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import security
+from i18n import LanguageMiddleware
 from api.routes import router
 
 app = FastAPI(
@@ -26,6 +27,8 @@ app.add_middleware(
 # Порядок: последним добавленный выполняется первым — сначала пароль, потом лимиты
 app.add_middleware(security.LimitsMiddleware)
 app.add_middleware(security.BasicAuthMiddleware)
+# Язык ответов (Accept-Language) — снаружи всего, чтобы и ошибки защиты были переведены
+app.add_middleware(LanguageMiddleware)
 
 app.include_router(router, prefix="/api")
 

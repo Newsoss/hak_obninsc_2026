@@ -25,6 +25,7 @@ from schemas.processing import (
 from services import verify
 from services.correction import CorrectionService, sha256, thumbnail
 from services.frame_store import Frame, FrameStore
+from i18n import t
 
 router = APIRouter()
 store = FrameStore(max_bytes=config.FRAME_STORE_MB * config.MB)
@@ -44,7 +45,7 @@ def _frame(frame_id: Optional[str], label: str) -> Optional[Frame]:
     try:
         return store.get(frame_id)
     except KeyError:
-        raise HTTPException(404, f"{label} не найден — загрузите файл заново") from None
+        raise HTTPException(404, t("err.not_found", label=label)) from None
 
 
 def _pseudo_flat(raw: Frame) -> Frame:
@@ -54,9 +55,9 @@ def _pseudo_flat(raw: Frame) -> Frame:
         return _pseudo_flats[raw.id]
     flat = Frame(
         id=f"gauss-{raw.id}",
-        name="оценка по снимку (размытие Гаусса)",
+        name=t("est.frame_gaussian"),
         image=estimate.gaussian_flat(raw.image),
-        meta={"estimated": {"method": "gaussian", "note": estimate.GAUSSIAN_NOTE}},
+        meta={"estimated": {"method": "gaussian", "note": t("est.gaussian_note")}},
     )
     _pseudo_flats[raw.id] = flat
     while len(_pseudo_flats) > 16:
@@ -69,9 +70,9 @@ def _estimated(frame: Optional[Frame]) -> Optional[dict]:
 
 
 def _refs(req: FrameRefs):
-    raw = _frame(req.raw_id, "Исходный снимок")
-    bright = _frame(req.bright_id, "Светлое поле") if req.bright_id else _pseudo_flat(raw)
-    dark = _frame(req.dark_id, "Темновой кадр")
+    raw = _frame(req.raw_id, t("label.raw"))
+    bright = _frame(req.bright_id, t("label.bright")) if req.bright_id else _pseudo_flat(raw)
+    dark = _frame(req.dark_id, t("label.dark"))
     key = (bright.id, dark.id if dark else None)
     return raw, bright, dark, key
 
@@ -82,17 +83,17 @@ def _settings(raw: Optional[str]) -> CorrectionSettings:
     try:
         return CorrectionSettings.model_validate_json(raw)
     except ValidationError as exc:
-        raise HTTPException(422, f"Некорректные настройки: {exc.errors()[0]['msg']}") from None
+        raise HTTPException(422, t("err.settings", msg=exc.errors()[0]["msg"])) from None
 
 
 def _check_size(size: Optional[int], name: str) -> None:
     if size is not None and size > config.MAX_UPLOAD_MB * config.MB:
-        raise HTTPException(413, f"{name}: файл больше {config.MAX_UPLOAD_MB} МБ")
+        raise HTTPException(413, t("err.file_too_big", name=name, mb=config.MAX_UPLOAD_MB))
 
 
 def _check_count(files: List[UploadFile]) -> None:
     if len(files) > config.MAX_FILES_PER_REQUEST:
-        raise HTTPException(413, f"Слишком много файлов в одном запросе (больше {config.MAX_FILES_PER_REQUEST})")
+        raise HTTPException(413, t("err.too_many_files", n=config.MAX_FILES_PER_REQUEST))
 
 
 async def _read(upload: UploadFile):
@@ -188,16 +189,15 @@ async def average_frames(
     single, mean = await run_in_threadpool(temporal_noise, images)
     gain = round(single / mean, 1) if mean > 1e-9 and len(images) >= 4 else None
     names = [source["name"] for _, source, _ in loaded]
-    label = "светлого поля" if role == "bright" else "темнового кадра"
+    what = t("avg.what.bright") if role == "bright" else t("avg.what.dark")
     info = {
         "count": len(images),
         "files": names,
         "noise_reduction": gain,
-        "note": f"Среднее {len(images)} кадров {label}, крайние значения отброшены"
-        + (f"; случайный шум ниже в {gain} раза" if gain else ""),
+        "note": t("avg.note", count=len(images), what=what) + (t("avg.noise", gain=gain) if gain else ""),
     }
     frame = store.put(
-        f"среднее {len(images)} кадров ({names[0]}…)",
+        t("avg.frame", count=len(images), first=names[0]),
         averaged,
         meta={**(loaded[0][2] or {}), "averaged": info},
     )
@@ -235,9 +235,9 @@ async def estimate_flat_from_series(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     count = min(len(images), estimate.MAX_SERIES)
-    note = estimate.MEDIAN_NOTE.format(count=count)
+    note = t("est.median_note", count=count)
     frame = store.put(
-        f"оценка по серии ({count} снимков, медиана)",
+        t("est.frame_median", count=count),
         flat,
         meta={"estimated": {"method": "median", "count": count, "note": note}},
     )
@@ -299,10 +299,10 @@ async def process_file(
 ):
     """Один снимок серии с уже загруженной калибровкой — для пакетной обработки с прогрессом."""
     image, source, meta = await _read(raw)
-    bright = _frame(bright_id, "Светлое поле")
-    dark = _frame(dark_id, "Темновой кадр")
+    bright = _frame(bright_id, t("label.bright"))
+    dark = _frame(dark_id, t("label.dark"))
     if format not in (None, "", *image_io.FORMATS):
-        raise HTTPException(422, f"Неизвестный формат {format}")
+        raise HTTPException(422, t("err.format", fmt=format))
     provenance = {"source": source, "bright_field": _info(bright), "dark_field": _info(dark)}
     data, name, mime, report, result = await run_in_threadpool(
         service.export, image, source["name"], bright.image, dark.image if dark else None,
@@ -327,21 +327,21 @@ def get_thumbs(thumb_id: str):
     """Миниатюры до/после, подготовленные при обработке файла серии."""
     pair = _thumbs.get(thumb_id)
     if pair is None:
-        raise HTTPException(404, "Миниатюры не найдены")
+        raise HTTPException(404, t("err.thumbs"))
     return pair
 
 
 @router.post("/process/batch", tags=["Processing"])
 async def process_batch(
     raw_images: List[UploadFile] = File(..., description="Серия снимков"),
-    bright_image: UploadFile = File(..., description="Светлое поле"),
-    dark_image: Optional[UploadFile] = File(None, description="Темновой кадр"),
+    bright_image: UploadFile = File(..., description=t("label.bright")),
+    dark_image: Optional[UploadFile] = File(None, description=t("label.dark")),
     settings: Optional[str] = Form(None, description="CorrectionSettings в JSON"),
     format: Optional[str] = Form(None, description="tiff | png | jpeg"),
 ):
     """Самодостаточный пакетный режим: все файлы в одном запросе, в ответ — ZIP с результатами и processing.json."""
     if format not in (None, "", *image_io.FORMATS):
-        raise HTTPException(422, f"Неизвестный формат {format}")
+        raise HTTPException(422, t("err.format", fmt=format))
     _check_count(raw_images)
     for f in raw_images:
         _check_size(f.size, f.filename or "image")

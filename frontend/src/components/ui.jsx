@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react';
+import { translate } from '../i18n';
 
 export function Button({ variant = 'secondary', size = 'md', icon: Icon, busy, className = '', children, ...props }) {
   const variants = {
@@ -42,7 +43,7 @@ export function Slider({ label, value, min, max, step, onChange, format = (v) =>
   const fill = ((value - min) / (max - min)) * 100;
   const reset = () => defaultValue !== undefined && onChange(defaultValue);
   return (
-    <label className="block" title="Двойной клик — сбросить">
+    <label className="block" title={translate('slider.reset')}>
       <div className="mb-1 flex items-center justify-between text-xs">
         <span className="text-muted">{label}</span>
         <span className={`tabular-nums ${value !== defaultValue ? 'text-ink' : 'text-faint'}`}>{format(value)}</span>

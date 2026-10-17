@@ -1,3 +1,4 @@
+import { translate } from '../i18n';
 import { DEFAULT_COLOR, DEFAULT_SETTINGS } from './presets';
 
 const SOFTWARE = 'MicroCleaner 2.0';
@@ -22,7 +23,7 @@ export function profileJson(settings, presetId) {
 export function parseProfile(text) {
   const data = JSON.parse(text);
   const raw = data?.settings;
-  if (!raw || typeof raw !== 'object') throw new Error('в файле нет настроек');
+  if (!raw || typeof raw !== 'object') throw new Error(translate('profile.no_settings'));
   return {
     presetId: typeof data.preset === 'string' ? data.preset : null,
     settings: { ...pick(DEFAULT_SETTINGS, raw), color: pick(DEFAULT_COLOR, raw.color) },
@@ -40,10 +41,11 @@ const calibration = (frame) =>
       }
     : null;
 
-const NOTE = 'Исследовательская обработка. Исходный файл не изменялся и должен храниться отдельно.';
+
 
 /** Если светлое поле оценено, а не снято, журнал честно говорит, что коррекция приблизительная. */
 function approximate(bright) {
+  const NOTE = translate('journal.note');
   const note = bright?.estimated?.note;
   return note ? { approximate: true, note: `${note} ${NOTE}` } : { note: NOTE };
 }

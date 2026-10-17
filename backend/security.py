@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 import config
+from i18n import t
 
 # Запросы, которые загружают файлы и нагружают процессор
 HEAVY_PATHS = {
@@ -52,7 +53,7 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
             ):
                 return await call_next(request)
         return Response(
-            "Нужен логин и пароль",
+            t("sec.auth"),
             status_code=401,
             headers={"WWW-Authenticate": 'Basic realm="MicroCleaner", charset="UTF-8"'},
             media_type="text/plain; charset=utf-8",
@@ -92,16 +93,16 @@ class LimitsMiddleware(BaseHTTPMiddleware):
 
         wait = self._rate_ok(client)
         if wait:
-            return _error(429, "Слишком много запросов — подождите немного", wait)
+            return _error(429, t("sec.rate"), wait)
 
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > config.MAX_REQUEST_MB * config.MB:
-            return _error(413, f"Запрос больше {config.MAX_REQUEST_MB} МБ")
+            return _error(413, t("sec.too_big", mb=config.MAX_REQUEST_MB))
 
         if request.method != "POST" or path not in HEAVY_PATHS:
             return await call_next(request)
         if self._active[client] >= config.HEAVY_PER_CLIENT or self._total >= config.HEAVY_TOTAL:
-            return _error(429, "Сервер занят обработкой — повторите через секунду", 1)
+            return _error(429, t("sec.busy"), 1)
         self._active[client] += 1
         self._total += 1
         try:

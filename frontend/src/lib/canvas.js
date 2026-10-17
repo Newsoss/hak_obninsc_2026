@@ -1,12 +1,14 @@
 // Сводка серии «до / после» для отчёта: рисуется в браузере на canvas.
 
+import { translate } from '../i18n';
+
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('не удалось загрузить изображение'));
+    img.onerror = () => reject(new Error(translate('image.load_error')));
     img.src = src;
   });
 }
@@ -61,8 +63,8 @@ export async function contactSheet(rows, title, subtitle) {
     ctx.drawImage(before, pad, y, cell, h);
     ctx.drawImage(after, pad + cell + gap, y, cell, h);
     if (i === 0) {
-      label(ctx, 'До', pad + 8, y + 8);
-      label(ctx, 'После', pad + cell + gap + 8, y + 8);
+      label(ctx, translate('viewer.before'), pad + 8, y + 8);
+      label(ctx, translate('viewer.after'), pad + cell + gap + 8, y + 8);
     }
     y += h + gap * 2;
   });

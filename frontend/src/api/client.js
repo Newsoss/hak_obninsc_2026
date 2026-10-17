@@ -1,4 +1,12 @@
+import { translate } from '../i18n';
+
 const BASE = import.meta.env.VITE_API_URL ?? '';
+
+// Язык интерфейса — сервер отвечает на нем (предупреждения, ошибки, журнал)
+let apiLanguage = 'ru';
+export function setApiLanguage(lang) {
+  apiLanguage = lang;
+}
 
 async function errorFrom(res) {
   let detail = `${res.status} ${res.statusText}`;
@@ -26,10 +34,13 @@ async function request(path, options = {}) {
   for (let attempt = 0; ; attempt += 1) {
     let res;
     try {
-      res = await fetch(BASE + path, options);
+      res = await fetch(BASE + path, {
+        ...options,
+        headers: { ...(options.headers || {}), 'Accept-Language': apiLanguage },
+      });
     } catch (err) {
       if (err.name === 'AbortError') throw err;
-      throw new Error('Сервер недоступен — запущен ли backend на :8000?');
+      throw new Error(translate('api.offline'));
     }
     if (res.status === 429 && attempt < 5) {
       const wait = Math.min(10, Number(res.headers.get('Retry-After')) || 1);

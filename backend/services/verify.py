@@ -10,6 +10,7 @@ import numpy as np
 from adapters import image_io
 from core import demo, estimate, metrics
 from core.flat_field import apply_profile, build_profile
+from i18n import t
 
 PASS_ERROR = 1.5  # средняя ошибка, % диапазона, при которой метод считаем корректным
 
@@ -38,20 +39,16 @@ def verify(specimen: Optional[np.ndarray] = None, name: Optional[str] = None) ->
     without_flat = apply_profile(raw, build_profile(estimate.gaussian_flat(raw), shot["dark"]))
 
     rows = [
-        {"method": "Без коррекции", **_compare(raw.astype(np.float32) - shot["dark"], truth)},
-        {"method": "Flat-field со светлым полем", **_compare(with_flat, truth)},
-        {"method": "Без светлого поля (оценка по снимку)", **_compare(without_flat, truth)},
+        {"id": "none", "method": t("verify.none"), **_compare(raw.astype(np.float32) - shot["dark"], truth)},
+        {"id": "flat", "method": t("verify.flat"), **_compare(with_flat, truth)},
+        {"id": "gaussian", "method": t("verify.gaussian"), **_compare(without_flat, truth)},
     ]
     error = rows[1]["mean_error"]
     passed = error <= PASS_ERROR
     return {
-        "specimen": name or "встроенный препарат",
+        "specimen": name or t("verify.builtin"),
         "passed": passed,
-        "verdict": (
-            f"Метод корректен: исправленный снимок отличается от эталона в среднем на {error}% диапазона"
-            if passed
-            else f"Отклонение от эталона {error}% — больше допустимых {PASS_ERROR}%"
-        ),
+        "verdict": t("verify.pass", error=error) if passed else t("verify.fail", error=error, limit=PASS_ERROR),
         "rows": rows,
         "images": {"truth": _picture(truth), "raw": _picture(raw), "corrected": _picture(with_flat)},
     }

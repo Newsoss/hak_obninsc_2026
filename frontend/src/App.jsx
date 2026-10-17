@@ -8,6 +8,7 @@ import {
   probePixel,
   uploadFrame,
 } from './api/client';
+import { useI18n } from './i18n';
 import { frameMeta, saveBlob } from './lib/files';
 import { applyPreset, PRESETS } from './lib/presets';
 import { fileLog, jsonBlob, logName, parseProfile, profileJson } from './lib/profile';
@@ -20,23 +21,14 @@ import MethodView from './components/MethodView';
 import SettingsPanel from './components/SettingsPanel';
 import { Button, Section, Segmented } from './components/ui';
 
-const VIEW_MODES = [
-  { value: 'split', label: 'Шторка' },
-  { value: 'side', label: 'Рядом' },
-  { value: 'map', label: 'Освещённость' },
-];
-
-const EXPORT_FORMATS = [
-  { value: '', label: 'Как у исходника' },
-  { value: 'tiff', label: 'TIFF' },
-  { value: 'png', label: 'PNG' },
-  { value: 'jpeg', label: 'JPEG' },
-];
+const VIEW_MODES = ['split', 'side', 'map'];
+const EXPORT_FORMATS = ['', 'tiff', 'png', 'jpeg'];
 
 const DEFAULT_PRESET = PRESETS.find((p) => p.id === 'brightfield');
-const SLOT_NAMES = { raw: 'Снимок', bright: 'Светлое поле', dark: 'Темновой кадр' };
 
 export default function App() {
+  const { t } = useI18n();
+  const slotName = (slot) => t(`slot.${slot}`);
   const [tab, setTab] = useState('single');
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [frames, setFrames] = useState({ raw: null, bright: null, dark: null });
@@ -98,37 +90,38 @@ export default function App() {
     async (slot, file) => {
       const several = Array.isArray(file);
       setUploading((u) => ({ ...u, [slot]: true }));
-      if (several) log(`${SLOT_NAMES[slot]}: усредняю ${file.length} кадров…`);
+      if (several) log(t('log.averaging', { slot: slotName(slot), n: file.length }));
       try {
         const info = several ? await averageFrames(file, slot) : await uploadFrame(file, slot);
         setFrames((f) => ({ ...f, [slot]: info }));
-        const pixelSize = info.metadata?.pixel_size ? `, пиксель ${info.metadata.pixel_size}` : '';
-        log(`${SLOT_NAMES[slot]}: ${info.name}, ${frameMeta(info)}${pixelSize}`);
-        if (info.averaged) log(`${SLOT_NAMES[slot]}: ${info.averaged.note}`);
-        info.checks.forEach((c) => log(`${SLOT_NAMES[slot]}: ${c}`, 'warn'));
+        const pixelSize = info.metadata?.pixel_size ? t('log.pixel_size', { size: info.metadata.pixel_size }) : '';
+        log(`${slotName(slot)}: ${info.name}, ${frameMeta(info)}${pixelSize}`);
+        if (info.averaged) log(`${slotName(slot)}: ${info.averaged.note}`);
+        info.checks.forEach((c) => log(`${slotName(slot)}: ${c}`, 'warn'));
       } catch (err) {
-        const name = several ? `${file.length} кадров` : file.name;
-        log(`${SLOT_NAMES[slot]}: ${name} — ${err.message}`, 'error');
+        const name = several ? t('log.frames', { n: file.length }) : file.name;
+        log(`${slotName(slot)}: ${name} — ${err.message}`, 'error');
       } finally {
         setUploading((u) => ({ ...u, [slot]: false }));
       }
     },
-    [log],
+    [log, t], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   /** Кадр уже на сервере (например, светлое поле, оцененное по серии в пакете). */
   const setFrameInfo = useCallback(
     (slot, info) => {
       setFrames((f) => ({ ...f, [slot]: info }));
-      log(`${SLOT_NAMES[slot]}: ${info.name}`);
+      log(`${slotName(slot)}: ${info.name}`);
       if (info.estimated) log(info.estimated.note, 'warn');
-      info.checks.forEach((c) => log(`${SLOT_NAMES[slot]}: ${c}`, 'warn'));
+      info.checks.forEach((c) => log(`${slotName(slot)}: ${c}`, 'warn'));
     },
     [log],
   );
 
   const settingsKey = JSON.stringify(settings);
-  const refs = useMemo(
+  // Что сейчас выбрано в панели (файлы и настройки)
+  const currentRefs = useMemo(
     () =>
       // Без светлого поля сервер оценит его по самому снимку (приблизительно)
       frames.raw
@@ -136,9 +129,32 @@ export default function App() {
         : null,
     [frames.raw?.id, frames.bright?.id, frames.dark?.id, settingsKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
-  const resultKey = refs ? `${refs.raw_id}|${refs.bright_id}|${refs.dark_id}|${settingsKey}` : '';
+  // Что обработано и показано на экране. Ползунки его не меняют — только кнопка «Обработать»
+  // или смена файлов. Сохранение, проба пикселя и зум работают с тем, что видно.
+  const [refs, setRefs] = useState(null);
+  const dirty = Boolean(currentRefs && refs) && JSON.stringify(currentRefs) !== JSON.stringify(refs);
+  const runProcessing = useCallback(() => setRefs(currentRefs), [currentRefs]);
 
-  // Превью пересчитывается при изменении настроек; устаревшие запросы отменяются
+  // Новые файлы обрабатываем сразу, чтобы снимок не висел пустым
+  useEffect(() => {
+    setRefs(currentRefs);
+  }, [frames.raw?.id, frames.bright?.id, frames.dark?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ctrl+Enter — обработать
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.ctrlKey && e.key === 'Enter' && tab === 'single') {
+        e.preventDefault();
+        runProcessing();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [runProcessing, tab]);
+
+  const resultKey = refs ? `${refs.raw_id}|${refs.bright_id}|${refs.dark_id}|${JSON.stringify(refs.settings)}` : '';
+
+  // Превью считается по обработанным настройкам; устаревший запрос отменяется
   useEffect(() => {
     if (!refs) {
       setPreview(null);
@@ -150,9 +166,9 @@ export default function App() {
       try {
         const result = await fetchPreview(refs, controller.signal);
         setPreview(result);
-        log(`Обработка ${frames.raw.name}: ${result.elapsed_ms.toFixed(0)} мс`);
+        log(t('log.processed', { name: frames.raw.name, ms: result.elapsed_ms.toFixed(0) }));
       } catch (err) {
-        if (err.name !== 'AbortError') log(`Превью: ${err.message}`, 'error');
+        if (err.name !== 'AbortError') log(t('log.preview_error', { error: err.message }), 'error');
       } finally {
         if (!controller.signal.aborted) setBusy(false);
       }
@@ -253,7 +269,7 @@ export default function App() {
           after: crop.after,
         });
       } catch (err) {
-        if (err.name !== 'AbortError') log(`Детальный просмотр: ${err.message}`, 'error');
+        if (err.name !== 'AbortError') log(t('log.detail_error', { error: err.message }), 'error');
       }
     }, 250);
   }, [refs, preview, resultKey, log]);
@@ -278,17 +294,22 @@ export default function App() {
     setExporting(true);
     try {
       const result = await exportImage({ ...refs, format: exportFormat || null });
+      // Сохраняется то, что обработано и показано, а не несохранённые правки в панели
       saveBlob(result.blob, result.name);
       // Журнал рядом с результатом: из чего и с какими настройками он получен
       await new Promise((r) => setTimeout(r, 250));
-      saveBlob(jsonBlob(fileLog({ source: frames.raw, result, frames, settings })), logName(result.name));
+      saveBlob(jsonBlob(fileLog({ source: frames.raw, result, frames, settings: refs.settings })), logName(result.name));
       log(
-        `Сохранено: ${frames.raw.name} → ${result.name} и ${logName(result.name)}, ` +
-          `${result.report?.elapsed_ms?.toFixed(0) ?? '?'} мс. Исходный файл не изменён.`,
+        t('log.saved', {
+          src: frames.raw.name,
+          out: result.name,
+          json: logName(result.name),
+          ms: result.report?.elapsed_ms?.toFixed(0) ?? '?',
+        }),
       );
-      if (result.report?.source_metadata) log('Метаданные исходного TIFF перенесены в результат');
+      if (result.report?.source_metadata) log(t('log.meta_kept'));
     } catch (err) {
-      log(`Сохранение: ${err.message}`, 'error');
+      log(t('log.save_error', { error: err.message }), 'error');
     } finally {
       setExporting(false);
     }
@@ -306,7 +327,7 @@ export default function App() {
 
   const saveProfile = () => {
     saveBlob(jsonBlob(profileJson(settings, presetId)), 'microcleaner-profile.json');
-    log('Профиль сохранён в microcleaner-profile.json');
+    log(t('log.profile_saved', { file: 'microcleaner-profile.json' }));
   };
 
   const loadProfile = async (file) => {
@@ -314,9 +335,9 @@ export default function App() {
       const profile = parseProfile(await file.text());
       setSettings(profile.settings);
       setPresetId(PRESETS.some((p) => p.id === profile.presetId) ? profile.presetId : null);
-      log(`Профиль загружен из ${file.name}`);
+      log(t('log.profile_loaded', { file: file.name }));
     } catch (err) {
-      log(`Не удалось прочитать профиль ${file.name}: ${err.message}`, 'error');
+      log(t('log.profile_error', { file: file.name, error: err.message }), 'error');
     }
   };
 
@@ -326,20 +347,19 @@ export default function App() {
   };
 
   const ready = Boolean(frames.raw);
-  const emptyHint = frames.bright
-    ? 'Загрузите снимок препарата.'
-    : 'Загрузите снимок и светлое поле слева. Без светлого поля коррекция будет приблизительной.';
+  const emptyHint = frames.bright ? t('hint.no_raw') : t('hint.empty');
 
   const status = useMemo(() => {
     if (tab !== 'single' || !preview) return '';
     if (pixel) {
       const values = (v) => v.join(' ');
       const chan = pixel.channels === 'rgb' ? 'RGB ' : '';
-      return `x ${pixel.x}, y ${pixel.y} · ${chan}до ${values(pixel.before)} → после ${values(pixel.after)}`;
+      return t('status.pixel', { x: pixel.x, y: pixel.y, chan, before: values(pixel.before), after: values(pixel.after) });
     }
-    const pixelSize = frames.raw?.metadata?.pixel_size ? ` · пиксель ${frames.raw.metadata.pixel_size}` : '';
-    return `${preview.width}×${preview.height}, ${preview.dtype}${pixelSize} · обработка ${preview.elapsed_ms.toFixed(0)} мс`;
-  }, [tab, preview, pixel, frames.raw]);
+    const pixelSize = frames.raw?.metadata?.pixel_size ? t('status.pixel_size', { size: frames.raw.metadata.pixel_size }) : '';
+    const processed = t('status.processed', { ms: preview.elapsed_ms.toFixed(0) });
+    return `${preview.width}×${preview.height}, ${preview.dtype}${pixelSize}${processed}`;
+  }, [tab, preview, pixel, frames.raw, t]);
 
   return (
     <div className="flex h-full flex-col">
@@ -354,13 +374,13 @@ export default function App() {
       {tab === 'single' && (
         <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
           <aside className="space-y-5 border-b border-line bg-surface p-4 lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
-            <Section title="Файлы">
-              <FrameSlot title="Снимок" frame={frames.raw} busy={uploading.raw} onFile={(f) => setFrame('raw', f)} />
-              <FrameSlot title="Светлое поле" frame={frames.bright} busy={uploading.bright}
+            <Section title={t('section.files')}>
+              <FrameSlot tone="raw" title={t('slot.raw')} frame={frames.raw} busy={uploading.raw} onFile={(f) => setFrame('raw', f)} />
+              <FrameSlot tone="bright" title={t('slot.bright')} frame={frames.bright} busy={uploading.bright}
                 multiple
-                emptyText="Можно несколько кадров."
+                emptyText={t('slot.bright_empty')}
                 onFile={(f) => setFrame('bright', f)} onClear={() => setFrames((f) => ({ ...f, bright: null }))} />
-              <FrameSlot title="Темновой кадр" optional multiple frame={frames.dark} busy={uploading.dark}
+              <FrameSlot tone="dark" title={t('slot.dark')} optional multiple frame={frames.dark} busy={uploading.dark}
                 onFile={(f) => setFrame('dark', f)} onClear={() => setFrames((f) => ({ ...f, dark: null }))} />
             </Section>
             <SettingsPanel
@@ -375,9 +395,9 @@ export default function App() {
 
           <section className="order-first flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2 p-3 lg:order-none lg:min-h-0">
             <div className="flex flex-wrap items-center gap-2">
-              <Segmented options={VIEW_MODES} value={mode} onChange={setMode} />
+              <Segmented options={VIEW_MODES.map((value) => ({ value, label: t(`view.${value}`) }))} value={mode} onChange={setMode} />
               <div className="flex items-center gap-0.5 text-xs text-muted">
-                <Button variant="ghost" size="icon" title="Отдалить" onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>
+                <Button variant="ghost" size="icon" title={t('zoom.out')} onClick={() => setZoom((z) => Math.max(1, z / 1.5))}>
                   −
                 </Button>
                 <button
@@ -385,34 +405,45 @@ export default function App() {
                   className="focus-ring w-12 rounded py-1 text-center tabular-nums hover:bg-raised hover:text-ink disabled:pointer-events-none"
                   disabled={!preview || zoom <= 1}
                   onClick={() => setZoom(1)}
-                  title="Масштаб относительно реального размера снимка. Нажмите, чтобы вписать в окно"
+                  title={t('zoom.scale')}
                 >
                   {preview ? `${actualScale}%` : '—'}
                 </button>
-                <Button variant="ghost" size="icon" title="Приблизить"
+                <Button variant="ghost" size="icon" title={t('zoom.in')}
                   onClick={() => setZoom((z) => Math.min(maxZoom, z * 1.5))}>
                   +
                 </Button>
-                <Button variant="ghost" size="sm" disabled={!preview} title="Один пиксель снимка — один пиксель экрана"
+                <Button variant="ghost" size="sm" disabled={!preview} title={t('zoom.one')}
                   onClick={() => setZoom(Math.min(maxZoom, Math.max(1, 1 / fit)))}>
                   1:1
                 </Button>
               </div>
               <div className="ml-auto flex items-center gap-2">
+                {dirty && <span className="text-xs text-warn">{t('process.dirty')}</span>}
+                <Button
+                  variant={dirty ? 'primary' : 'secondary'}
+                  onClick={runProcessing}
+                  disabled={!currentRefs || (!dirty && Boolean(preview)) || busy}
+                  busy={busy}
+                  title={t('process.title')}
+                >
+                  {t('process.button')}
+                </Button>
                 <select
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
-                  title="Формат файла"
+                  title={t('format.title')}
                   className="field text-xs"
                 >
-                  {EXPORT_FORMATS.map((f) => (
-                    <option key={f.value} value={f.value}>
-                      {f.label}
+                  {EXPORT_FORMATS.map((value) => (
+                    <option key={value} value={value}>
+                      {value ? value.toUpperCase() : t('format.source')}
                     </option>
                   ))}
                 </select>
-                <Button variant="primary" onClick={download} disabled={!ready} busy={exporting}>
-                  Сохранить результат
+                <Button variant={dirty ? 'secondary' : 'primary'} onClick={download} disabled={!ready || !preview} busy={exporting}
+                  title={dirty ? t('save.dirty') : undefined}>
+                  {t('save.button')}
                 </Button>
               </div>
             </div>
@@ -431,8 +462,8 @@ export default function App() {
               approximate={
                 preview?.approximate
                   ? frames.bright?.estimated
-                    ? 'Светлое поле оценено по серии'
-                    : 'Приблизительно: без светлого поля'
+                    ? t('approx.series')
+                    : t('approx.none')
                   : null
               }
             />
@@ -473,19 +504,19 @@ export default function App() {
         />
       )}
 
-      <footer className="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-surface px-2 text-xs text-muted">
+      <footer className="flex h-6 shrink-0 items-center gap-3 bg-accent px-2 text-xs text-on-accent">
         <button
           type="button"
           onClick={toggleLog}
-          title="Логи (Ctrl+`)"
-          className={`flex h-full items-center gap-1.5 px-1.5 hover:bg-raised hover:text-ink ${logOpen ? 'text-ink' : ''}`}
+          title={t('logs.shortcut')}
+          className={`flex h-full items-center gap-1.5 px-1.5 hover:bg-white/15 ${logOpen ? 'bg-white/15' : ''}`}
         >
           <SquareTerminal className="h-3.5 w-3.5" />
-          Логи
+          {t('logs.button')}
           {unread.count > 0 && (
             <span
               className={`rounded-full px-1.5 text-[10px] leading-4 ${
-                unread.errors ? 'bg-bad text-white' : 'bg-raised text-muted'
+                unread.errors ? 'bg-bad text-white' : 'bg-white/25 text-on-accent'
               }`}
             >
               {unread.count}

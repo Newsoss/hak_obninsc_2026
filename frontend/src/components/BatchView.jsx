@@ -5,35 +5,32 @@ import { contactSheet } from '../lib/canvas';
 import { ACCEPT, browserCanShow, formatBytes, isImageFile, saveBlob } from '../lib/files';
 import { PRESETS } from '../lib/presets';
 import { batchLog, fileLog, jsonBlob, logName } from '../lib/profile';
+import { currentLanguage, useI18n } from '../i18n';
 import FrameSlot from './FrameSlot';
 import { Button, Section, Spinner } from './ui';
 
 const CONCURRENCY = 3;
 const MIN_SERIES = 5; // столько снимков нужно, чтобы оценить светлое поле медианой
-const FORMATS = [
-  { value: '', label: 'Как у исходника' },
-  { value: 'tiff', label: 'TIFF' },
-  { value: 'png', label: 'PNG' },
-  { value: 'jpeg', label: 'JPEG' },
-];
+const FORMATS = ['', 'tiff', 'png', 'jpeg'];
 
 let nextId = 1;
 
 function Status({ item }) {
-  if (item.status === 'done') return <span className="text-good">Готово</span>;
+  const { t } = useI18n();
+  if (item.status === 'done') return <span className="text-good">{t('status.done')}</span>;
   if (item.status === 'processing')
     return (
       <span className="inline-flex items-center gap-1 text-muted">
-        <Spinner className="h-3 w-3" /> Обработка
+        <Spinner className="h-3 w-3" /> {t('status.processing')}
       </span>
     );
   if (item.status === 'error')
     return (
       <span className="text-bad" title={item.error}>
-        Ошибка
+        {t('status.error')}
       </span>
     );
-  return <span className="text-faint">Ожидает</span>;
+  return <span className="text-faint">{t('status.queued')}</span>;
 }
 
 /** Файлы из перетащенных папок (с вложенными) и отдельных файлов. */
@@ -76,6 +73,7 @@ export default function BatchView({
   onCount,
   log,
 }) {
+  const { t } = useI18n();
   const [items, setItems] = useState([]);
   const [format, setFormat] = useState('');
   const [running, setRunning] = useState(false);
@@ -99,12 +97,12 @@ export default function BatchView({
 
   const patch = (id, changes) => setItems((list) => list.map((it) => (it.id === id ? { ...it, ...changes } : it)));
 
-  const addFiles = (fileList, source = 'файлы') => {
+  const addFiles = (fileList, source = t('batch.src_files')) => {
     const all = Array.from(fileList || []);
     const files = all.filter(isImageFile);
-    if (all.length > files.length) log(`Пропущено ${all.length - files.length} файл(ов) не в формате TIFF/PNG/JPEG/BMP`, 'warn');
+    if (all.length > files.length) log(t('batch.log_skipped', { n: all.length - files.length }), 'warn');
     if (!files.length) return;
-    log(`Добавлено в пакет (${source}): ${files.length}`);
+    log(t('batch.log_added', { source, n: files.length }));
     setItems((list) => [
       ...list,
       ...files.map((file) => ({
@@ -120,7 +118,7 @@ export default function BatchView({
   const onDrop = async (e) => {
     e.preventDefault();
     setOver(false);
-    addFiles(await filesFromDrop(e.dataTransfer), 'перетаскивание');
+    addFiles(await filesFromDrop(e.dataTransfer), t('batch.src_drop'));
   };
 
   const remove = (id) =>
@@ -134,17 +132,17 @@ export default function BatchView({
   const estimateFromSeries = async () => {
     const files = itemsRef.current.map((it) => it.file);
     if (files.length < MIN_SERIES) {
-      log(`Чтобы оценить светлое поле по серии, нужно минимум ${MIN_SERIES} снимков (сейчас ${files.length})`, 'error');
+      log(t('batch.log_need_series', { min: MIN_SERIES, n: files.length }), 'error');
       return null;
     }
     setEstimating(true);
-    log(`Оцениваю светлое поле по серии из ${files.length} снимков (медиана)…`);
+    log(t('batch.log_estimating', { n: files.length }));
     try {
       const info = await estimateFlat(files);
       onFrameInfo('bright', info);
       return info;
     } catch (err) {
-      log(`Оценка светлого поля: ${err.message}`, 'error');
+      log(t('batch.log_estimate_error', { error: err.message }), 'error');
       return null;
     } finally {
       setEstimating(false);
@@ -162,7 +160,13 @@ export default function BatchView({
     stopRef.current = false;
     setRunning(true);
     const started = performance.now();
-    log(`Пакет: обработка ${queue.length} файл(ов), светлое поле ${bright.name}${frames.dark ? `, темновой кадр ${frames.dark.name}` : ''}`);
+    log(
+      t('batch.log_start', {
+        n: queue.length,
+        bright: bright.name,
+        dark: frames.dark ? t('batch.log_start_dark', { name: frames.dark.name }) : '',
+      }),
+    );
     const options = { brightId: bright.id, darkId: frames.dark?.id, settings, format, thumbs: true };
     const used = { frames: { bright, dark: frames.dark }, settings };
 
@@ -174,7 +178,7 @@ export default function BatchView({
           const result = await processFile(item.file, options);
           const thumbs = result.thumbsId ? await fetchThumbs(result.thumbsId).catch(() => null) : null;
           patch(item.id, { status: 'done', result, thumbs, used });
-          log(`${item.path} → ${result.name}, ${result.report.elapsed_ms.toFixed(0)} мс`);
+          log(t('batch.log_file', { path: item.path, out: result.name, ms: result.report.elapsed_ms.toFixed(0) }));
         } catch (err) {
           patch(item.id, { status: 'error', error: err.message });
           log(`${item.path}: ${err.message}`, 'error');
@@ -184,7 +188,7 @@ export default function BatchView({
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     const total = performance.now() - started;
     setElapsed(total);
-    log(`Пакет ${stopRef.current ? 'остановлен' : 'готов'} за ${(total / 1000).toFixed(1)} с`);
+    log(t(stopRef.current ? 'batch.log_stopped' : 'batch.log_done', { s: (total / 1000).toFixed(1) }));
     setRunning(false);
   };
 
@@ -195,7 +199,7 @@ export default function BatchView({
     saveBlob(it.result.blob, it.result.name);
     await wait(250);
     saveBlob(jsonBlob(itemLog(it)), logName(it.result.name));
-    log(`Сохранено: ${it.result.name} и ${logName(it.result.name)}`);
+    log(t('batch.log_saved', { out: it.result.name, json: logName(it.result.name) }));
     await wait(250);
   };
 
@@ -205,19 +209,19 @@ export default function BatchView({
       .filter((it) => it.thumbs)
       .map((it) => ({
         name: it.path,
-        note: `${it.result.report.elapsed_ms.toFixed(0)} мс`,
+        note: t('batch.ms', { ms: it.result.report.elapsed_ms.toFixed(0) }),
         before: it.thumbs.before,
         after: it.thumbs.after,
       }));
     if (!rows.length) return null;
-    const preset = PRESETS.find((p) => p.id === presetId)?.name ?? 'свои настройки';
+    const preset = presetId ? t(`preset.${presetId}`) : t('preset.custom');
     const calib = [
-      frames.bright && `светлое поле ${frames.bright.name}`,
-      frames.dark && `темновой кадр ${frames.dark.name}`,
+      frames.bright && t('batch.summary_bright', { name: frames.bright.name }),
+      frames.dark && t('batch.summary_dark', { name: frames.dark.name }),
       preset,
-      new Date().toLocaleString('ru-RU'),
+      new Date().toLocaleString(currentLanguage() === 'en' ? 'en-GB' : 'ru-RU'),
     ].filter(Boolean);
-    return contactSheet(rows, `MicroCleaner — серия из ${rows.length} снимков`, calib.join(' · '));
+    return contactSheet(rows, t('batch.summary_heading', { n: rows.length }), calib.join(' · '));
   };
 
   const downloadSummary = async () => {
@@ -225,9 +229,9 @@ export default function BatchView({
       const blob = await buildSummary(items.filter((it) => it.status === 'done'));
       if (!blob) return;
       saveBlob(blob, 'microcleaner_summary.png');
-      log('Сводка до/после сохранена: microcleaner_summary.png');
+      log(t('batch.log_summary', { file: 'microcleaner_summary.png' }));
     } catch (err) {
-      log(`Сводка: ${err.message}`, 'error');
+      log(t('batch.log_summary_error', { error: err.message }), 'error');
     }
   };
 
@@ -246,7 +250,7 @@ export default function BatchView({
       const summary = await buildSummary(finished);
       if (summary) entries['summary.png'] = [new Uint8Array(await summary.arrayBuffer()), { level: 0 }];
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
-      log(`Сохранён microcleaner_batch.zip: ${finished.length} файл(ов), журналы *_ffc.json, processing.json и summary.png`);
+      log(t('batch.log_zip', { file: 'microcleaner_batch.zip', n: finished.length }));
     } catch (err) {
       log(`ZIP: ${err.message}`, 'error');
     }
@@ -264,43 +268,42 @@ export default function BatchView({
   const failed = items.filter((it) => it.status === 'error').length;
   const progress = items.length ? ((done.length + failed) / items.length) * 100 : 0;
   const preset = PRESETS.find((p) => p.id === presetId);
+  const presetLabel = preset ? t(`preset.${preset.id}`).toLowerCase() : t('preset.custom').toLowerCase();
 
   return (
     <div className="mx-auto grid w-full max-w-5xl gap-6 p-4 lg:grid-cols-[260px_1fr] lg:p-6">
       <aside className="space-y-5">
-        <Section title="Калибровка">
-          <FrameSlot title="Светлое поле" multiple frame={frames.bright} busy={uploading.bright || estimating}
-            emptyText={`Нет — оценим по серии (от ${MIN_SERIES} снимков)`}
+        <Section title={t('batch.calibration')}>
+          <FrameSlot tone="bright" title={t('slot.bright')} multiple frame={frames.bright} busy={uploading.bright || estimating}
+            emptyText={t('batch.bright_empty', { min: MIN_SERIES })}
             onFile={(f) => onFrame('bright', f)} onClear={onClearBright} />
-          <FrameSlot title="Темновой кадр" optional multiple frame={frames.dark} busy={uploading.dark}
+          <FrameSlot tone="dark" title={t('slot.dark')} optional multiple frame={frames.dark} busy={uploading.dark}
             onFile={(f) => onFrame('dark', f)} onClear={onClearDark} />
           {!frames.bright && (
             <div className="space-y-1.5">
               <Button size="sm" className="w-full justify-center" onClick={estimateFromSeries}
                 disabled={running || estimating || items.length < MIN_SERIES} busy={estimating}
-                title="Светлое поле = медиана по снимкам серии. Работает, если препарат на снимках в разных местах">
-                Оценить по серии
+                title={t('batch.estimate_title')}>
+                {t('batch.estimate')}
               </Button>
-              <p className="text-xs text-muted">
-                Светлое поле не снимали? При {MIN_SERIES} и более снимках разных полей зрения оно будет оценено
-                по серии — каждый участок кадра берётся там, где на нём нет препарата.
-              </p>
             </div>
           )}
         </Section>
 
-        <Section title="Настройки">
+        <Section title={t('batch.settings')}>
           <p className="text-xs text-muted">
-            Берутся со вкладки «Обработка»: {preset ? preset.name.toLowerCase() : 'свои настройки'}
-            {settings.neutralize_color ? ', без оттенка осветителя' : ''}
-            {settings.smoothing ? `, сглаживание ${settings.smoothing} px` : ''}.
+            {t('batch.settings_from', {
+              preset: presetLabel,
+              neutral: settings.neutralize_color ? t('batch.neutral') : '',
+              smooth: settings.smoothing ? t('batch.smooth', { px: settings.smoothing }) : '',
+            })}
           </p>
           <label className="block text-xs text-muted">
-            Формат файлов
+            {t('batch.format')}
             <select className="field mt-1 w-full" value={format} onChange={(e) => setFormat(e.target.value)}>
-              {FORMATS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
+              {FORMATS.map((value) => (
+                <option key={value} value={value}>
+                  {value ? value.toUpperCase() : t('format.source')}
                 </option>
               ))}
             </select>
@@ -310,17 +313,17 @@ export default function BatchView({
 
       <section className="min-w-0 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="mr-auto text-base font-semibold">Пакетная обработка</h2>
+          <h2 className="mr-auto text-base font-semibold">{t('batch.title')}</h2>
           <Button size="sm" onClick={() => fileInput.current?.click()} disabled={running}>
-            Добавить файлы
+            {t('batch.add_files')}
           </Button>
           <Button size="sm" onClick={() => folderInput.current?.click()} disabled={running}
-            title="Все снимки из папки, включая вложенные">
-            Добавить папку
+            title={t('batch.add_folder_title')}>
+            {t('batch.add_folder')}
           </Button>
           {running ? (
             <Button size="sm" onClick={() => { stopRef.current = true; }}>
-              Остановить
+              {t('batch.stop')}
             </Button>
           ) : (
             <Button
@@ -332,11 +335,11 @@ export default function BatchView({
                 frames.bright
                   ? undefined
                   : items.length < MIN_SERIES
-                    ? `Загрузите светлое поле или добавьте минимум ${MIN_SERIES} снимков`
-                    : 'Светлое поле будет оценено по серии'
+                    ? t('batch.need_bright', { min: MIN_SERIES })
+                    : t('batch.will_estimate')
               }
             >
-              {pendingCount || !items.length ? 'Обработать' : 'Обработать заново'}
+              {pendingCount || !items.length ? t('batch.process') : t('batch.reprocess')}
             </Button>
           )}
         </div>
@@ -344,7 +347,7 @@ export default function BatchView({
         <input ref={fileInput} type="file" multiple accept={ACCEPT} hidden
           onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         <input ref={folderInput} type="file" multiple hidden webkitdirectory=""
-          onChange={(e) => { addFiles(e.target.files, 'папка'); e.target.value = ''; }} />
+          onChange={(e) => { addFiles(e.target.files, t('batch.src_folder')); e.target.value = ''; }} />
 
         {!items.length ? (
           <div
@@ -355,9 +358,9 @@ export default function BatchView({
               over ? 'border-accent bg-accent-soft' : 'border-line'
             }`}
           >
-            Перетащите сюда снимки серии или целую папку (TIFF, PNG, JPEG).
+            {t('batch.drop')}
             <br />
-            Ко всем применяются одна калибровка и одни настройки.
+            {t('batch.drop_note')}
           </div>
         ) : (
           <div
@@ -368,10 +371,10 @@ export default function BatchView({
             <table className="w-full table-fixed text-sm">
               <thead className="border-b border-line bg-raised text-left text-xs text-muted">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Файл</th>
-                  <th className="hidden w-20 px-3 py-2 font-medium sm:table-cell">Размер</th>
-                  <th className="w-20 px-3 py-2 font-medium">Время</th>
-                  <th className="w-24 px-3 py-2 font-medium">Статус</th>
+                  <th className="px-3 py-2 font-medium">{t('batch.th_file')}</th>
+                  <th className="hidden w-20 px-3 py-2 font-medium sm:table-cell">{t('batch.th_size')}</th>
+                  <th className="w-20 px-3 py-2 font-medium">{t('batch.th_time')}</th>
+                  <th className="w-24 px-3 py-2 font-medium">{t('batch.th_status')}</th>
                   <th className="w-40 px-3 py-2" />
                 </tr>
               </thead>
@@ -392,22 +395,22 @@ export default function BatchView({
                       </td>
                       <td className="hidden whitespace-nowrap px-3 text-muted sm:table-cell">{formatBytes(it.file.size)}</td>
                       <td className="whitespace-nowrap px-3 tabular-nums text-muted">
-                        {it.result ? `${it.result.report.elapsed_ms.toFixed(0)} мс` : '—'}
+                        {it.result ? t('batch.ms', { ms: it.result.report.elapsed_ms.toFixed(0) }) : '—'}
                       </td>
                       <td className="whitespace-nowrap px-3 text-xs">
                         <Status item={it} />
                       </td>
                       <td className="whitespace-nowrap px-3 text-right text-xs">
                         <button type="button" className="text-accent hover:underline" onClick={() => onOpen(it.file)}>
-                          Открыть
+                          {t('batch.open')}
                         </button>
                         {it.result && (
                           <button type="button" className="ml-3 text-accent hover:underline" onClick={() => saveItem(it)}>
-                            Скачать
+                            {t('batch.download')}
                           </button>
                         )}
                         {!running && (
-                          <button type="button" className="ml-3 text-faint hover:text-bad" title="Убрать из списка"
+                          <button type="button" className="ml-3 text-faint hover:text-bad" title={t('batch.remove')}
                             onClick={() => remove(it.id)}>
                             ✕
                           </button>
@@ -428,20 +431,20 @@ export default function BatchView({
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
               <span className="mr-auto">
-                Готово {done.length} из {items.length}
-                {failed ? `, с ошибкой ${failed}` : ''}
-                {elapsed && !running ? ` · ${(elapsed / 1000).toFixed(1)} с` : ''}
+                {t('batch.progress', { done: done.length, total: items.length })}
+                {failed ? t('batch.failed', { n: failed }) : ''}
+                {elapsed && !running ? t('batch.seconds', { s: (elapsed / 1000).toFixed(1) }) : ''}
               </span>
               <Button size="sm" onClick={downloadSummary} disabled={!done.length || running}
-                title="Все снимки серии «до / после» на одной картинке">
-                Сводка до/после
+                title={t('batch.summary_title')}>
+                {t('batch.summary')}
               </Button>
               <Button size="sm" onClick={downloadFiles} disabled={!done.length || running}>
-                Скачать по одному
+                {t('batch.download_each')}
               </Button>
               <Button size="sm" onClick={downloadZip} disabled={!done.length || running}
-                title="Результаты, их журналы, processing.json и сводка до/после">
-                Скачать ZIP
+                title={t('batch.zip_title')}>
+                {t('batch.zip')}
               </Button>
             </div>
           </div>

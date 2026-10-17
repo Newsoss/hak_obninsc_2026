@@ -3,10 +3,10 @@
 @tailwind utilities;
 
 :root {
-  --canvas: 244 244 245;
+  --canvas: 240 243 248;
   --surface: 255 255 255;
-  --raised: 244 244 245;
-  --line: 222 222 226;
+  --raised: 240 243 248;
+  --line: 218 223 232;
   --ink: 24 24 27;
   --muted: 82 82 91;
   --faint: 140 140 150;
@@ -16,25 +16,25 @@
   --good: 22 128 61;
   --warn: 180 83 9;
   --bad: 200 30 30;
-  --stage: 228 228 231;
+  --stage: 225 230 238;
   color-scheme: light;
 }
 
 .dark {
-  --canvas: 24 24 27;
-  --surface: 32 32 36;
-  --raised: 42 42 47;
-  --line: 58 58 64;
+  --canvas: 21 24 30;
+  --surface: 29 33 41;
+  --raised: 39 44 54;
+  --line: 54 61 74;
   --ink: 236 236 239;
   --muted: 170 170 178;
   --faint: 120 120 130;
-  --accent: 96 155 250;
+  --accent: 59 130 246;
   --accent-soft: 35 45 66;
   --on-accent: 255 255 255;
   --good: 74 190 120;
   --warn: 230 160 60;
   --bad: 240 100 100;
-  --stage: 17 17 19;
+  --stage: 14 16 21;
   color-scheme: dark;
 }
 

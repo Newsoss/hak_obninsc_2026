@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 import { Spinner } from './ui';
 
 const GAP = 8;
@@ -11,9 +12,17 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 /** Наибольший масштаб: 8 экранных пикселей на пиксель снимка. */
 export const maxZoomFor = (fit) => Math.max(4, 8 / Math.max(fit, 1e-6));
 
-function Label({ children, className = '' }) {
+const LABEL_TONES = {
+  before: 'bg-rose-600/85',
+  after: 'bg-emerald-600/85',
+  neutral: 'bg-black/65',
+};
+
+function Label({ children, tone = 'neutral', className = '' }) {
   return (
-    <span className={`pointer-events-none absolute z-10 rounded bg-black/65 px-2 py-0.5 text-sm font-medium text-white ${className}`}>
+    <span
+      className={`pointer-events-none absolute z-10 rounded px-2 py-0.5 text-sm font-medium text-white ${LABEL_TONES[tone]} ${className}`}
+    >
       {children}
     </span>
   );
@@ -36,6 +45,7 @@ export default function CompareViewer({
   onFit,
   approximate = null, // текст пометки, если светлое поле оценено, а не снято
 }) {
+  const { t } = useI18n();
   const box = useRef(null);
   const drag = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -242,11 +252,11 @@ export default function CompareViewer({
         <div className="absolute inset-0">
           <div className="absolute" style={stageStyle}>
             <div className="absolute inset-0">
-              {img(preview.after, 'После коррекции')}
+              {img(preview.after, t('viewer.after_alt'))}
               {detailImg(detail?.after)}
             </div>
             <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
-              {img(preview.before, 'До коррекции')}
+              {img(preview.before, t('viewer.before_alt'))}
               {detailImg(detail?.before)}
             </div>
             {/* Линию можно схватить в любом месте: невидимая полоса шириной 24 px */}
@@ -265,36 +275,36 @@ export default function CompareViewer({
               </div>
             </div>
           </div>
-          <Label className="left-2 top-2">До</Label>
-          <Label className="right-2 top-2">После</Label>
+          <Label tone="before" className="left-2 top-2">{t('viewer.before')}</Label>
+          <Label tone="after" className="right-2 top-2">{t('viewer.after')}</Label>
         </div>
       )}
 
       {preview && mode === 'side' &&
         [
-          [preview.before, detail?.before, 'До'],
-          [preview.after, detail?.after, 'После'],
+          [preview.before, detail?.before, t('viewer.before')],
+          [preview.after, detail?.after, t('viewer.after')],
         ].map(([src, hi, label], i) => (
           <div key={label} className="absolute inset-y-0 overflow-hidden" style={{ left: i * (paneW + GAP), width: paneW }}>
             <div className="absolute" style={stageStyle}>
               {img(src, label)}
               {detailImg(hi)}
             </div>
-            <Label className="left-2 top-2">{label}</Label>
+            <Label tone={i ? 'after' : 'before'} className="left-2 top-2">{label}</Label>
           </div>
         ))}
 
       {preview && mode === 'map' && (
         <div className="absolute inset-0">
           <div className="absolute" style={stageStyle}>
-            {img(preview.illumination_map, 'Карта освещённости')}
+            {img(preview.illumination_map, t('viewer.map_alt'))}
           </div>
-          <Label className="left-2 top-2">Освещённость по светлому полю</Label>
+          <Label className="left-2 top-2">{t('viewer.map')}</Label>
           <div className="pointer-events-none absolute bottom-2 left-1/2 z-10 w-56 -translate-x-1/2 rounded bg-black/60 px-2 py-1.5 text-white">
             <div className="h-1.5 rounded-sm" style={{ background: TURBO }} />
             <div className="mt-0.5 flex justify-between text-[11px]">
-              <span>темнее</span>
-              <span>ярче</span>
+              <span>{t('viewer.darker')}</span>
+              <span>{t('viewer.brighter')}</span>
             </div>
           </div>
         </div>
@@ -315,7 +325,7 @@ export default function CompareViewer({
           }}
           onPointerUp={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
-          title="Навигатор: щёлкните, чтобы перейти"
+          title={t('viewer.nav')}
         >
           <img
             src={mode === 'map' ? preview.illumination_map : preview.after}
@@ -338,7 +348,7 @@ export default function CompareViewer({
       {preview && approximate && mode !== 'map' && (
         <span
           className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded bg-amber-500/90 px-2 py-0.5 text-xs font-medium text-black"
-          title="Светлое поле не снималось, а оценено — коррекция приблизительная"
+          title={t('viewer.approx_title')}
         >
           {approximate}
         </span>
@@ -352,7 +362,7 @@ export default function CompareViewer({
 
       {busy && (
         <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5 rounded bg-black/60 px-2 py-1 text-xs text-white">
-          <Spinner className="h-3 w-3" /> Обработка…
+          <Spinner className="h-3 w-3" /> {t('viewer.busy')}
         </div>
       )}
     </div>

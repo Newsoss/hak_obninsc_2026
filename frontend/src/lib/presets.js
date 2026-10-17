@@ -16,13 +16,14 @@ export const DEFAULT_SETTINGS = {
   color: DEFAULT_COLOR,
 };
 
+// Название пресета — в словаре: t(`preset.${id}`)
 export const PRESETS = [
-  { id: 'ffc', name: 'Только выравнивание', color: {} },
-  { id: 'brightfield', name: 'Светлое поле', color: { auto_levels: true, contrast: 1.05, saturation: 1.1 } },
-  { id: 'histology', name: 'Гистология', color: { auto_levels: true, contrast: 1.15, saturation: 1.4, gamma: 0.95 } },
+  { id: 'ffc', color: {} },
+  { id: 'brightfield', color: { auto_levels: true, contrast: 1.05, saturation: 1.1 } },
+  { id: 'histology', color: { auto_levels: true, contrast: 1.15, saturation: 1.4, gamma: 0.95 } },
   {
     id: 'fluorescence',
-    name: 'Флуоресценция',
+
     neutralize_color: false,
     color: { exposure: 0.5, contrast: 1.3, gamma: 1.25, saturation: 1.2 },
   },

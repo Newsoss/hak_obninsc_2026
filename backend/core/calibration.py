@@ -6,6 +6,7 @@ import numpy as np
 
 from core.color import white_level
 from core.flat_field import to_luminance
+from i18n import t
 
 SATURATED_LIMIT = 0.01      # доля пикселей в насыщении, после которой светлое поле считаем пересвеченным
 DARK_BRIGHT_FIELD = 0.10    # медиана светлого поля ниже 10% диапазона — слишком темно
@@ -40,26 +41,20 @@ def check_bright(image: np.ndarray) -> List[str]:
         saturated = saturated.any(axis=2)
     share = float(saturated.mean())
     if share > SATURATED_LIMIT:
-        issues.append(
-            f"Светлое поле пересвечено: {share * 100:.1f}% пикселей в насыщении. "
-            "В этих местах неравномерность не исправится — уменьшите экспозицию калибровки."
-        )
+        issues.append(t("cal.saturated", share=share * 100))
 
     if float(np.median(lum)) < white * DARK_BRIGHT_FIELD:
-        issues.append("Светлое поле слишком тёмное — коррекция будет шумной. Увеличьте экспозицию калибровки.")
+        issues.append(t("cal.too_dark"))
 
     structure = structure_fraction(image)
     if structure > STRUCTURE_LIMIT:
-        issues.append(
-            f"В светлом поле видны мелкие детали ({structure * 100:.0f}% площади) — похоже на препарат "
-            "или сильное загрязнение. Снимите калибровку на чистом участке стекла."
-        )
+        issues.append(t("cal.structure", share=structure * 100))
     return issues
 
 
 def check_dark(image: np.ndarray) -> List[str]:
     if float(np.median(to_luminance(image))) > white_level(image) * BRIGHT_DARK_FRAME:
-        return ["Темновой кадр слишком светлый — возможно, затвор был открыт или перепутаны файлы."]
+        return [t("cal.dark_too_bright")]
     return []
 
 

@@ -15,6 +15,7 @@ import numpy as np
 
 from core.calibration import STRUCTURE_LIMIT, structure_fraction
 from core.flat_field import finite, to_luminance
+from i18n import t
 
 GAUSSIAN_SIDE = 768
 MEDIAN_SIDE = 512
@@ -26,15 +27,6 @@ OBJECT_DEVIATION = 0.08  # отклонение от фона, после кот
 # сильнее размытие — не догоняет виньетирование в углах, слабее — «стирает» крупные клетки.
 GAUSSIAN_SIGMA_FRACTION = 1 / 25
 
-GAUSSIAN_NOTE = (
-    "Приблизительная коррекция: светлое поле не снималось, а оценено по самому снимку "
-    "размытием (псевдо flat-field). Крупные объекты и плавные перепады окраски могут "
-    "частично попасть в «фон». Для точной коррекции снимите светлое поле."
-)
-MEDIAN_NOTE = (
-    "Светлое поле не снималось, а оценено как медиана по {count} снимкам серии. "
-    "Оценка верна, если на каждом участке кадра в большинстве снимков нет препарата."
-)
 
 
 def _shrink(image: np.ndarray, side: int) -> np.ndarray:
@@ -65,7 +57,7 @@ def gaussian_flat(image: np.ndarray) -> np.ndarray:
 def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
     """Светлое поле как медиана серии. Возвращает (оценка, предупреждения)."""
     if len(images) < MIN_SERIES:
-        raise ValueError(f"для оценки по серии нужно минимум {MIN_SERIES} снимков, загружено {len(images)}")
+        raise ValueError(t("est.min_series", min=MIN_SERIES, n=len(images)))
     warnings: List[str] = []
     if len(images) > MAX_SERIES:
         # Равномерная выборка: медиане хватает, а память не раздувается
@@ -79,7 +71,7 @@ def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
     stack = []
     for img in images:
         if abs(img.shape[1] / img.shape[0] - reference_aspect) > 0.01:
-            warnings.append("Снимки серии разного размера или формы кадра — приведены к первому.")
+            warnings.append(t("est.size_mismatch"))
         small = _shrink(img, MEDIAN_SIDE)
         if small.shape[:2] != (h, w):
             small = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
@@ -94,12 +86,9 @@ def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
 
     count = len(stack)
     if count < RELIABLE_SERIES:
-        warnings.append(f"Снимков всего {count} — оценка может быть шумной, лучше 10 и больше.")
+        warnings.append(t("est.few", count=count))
     if structure_fraction(flat) > STRUCTURE_LIMIT:
-        warnings.append(
-            "В оценке светлого поля видны детали препарата: объекты на разных снимках слишком часто "
-            "совпадают по положению. Добавьте снимки других полей зрения или снимите светлое поле."
-        )
+        warnings.append(t("est.structure"))
     return flat, list(dict.fromkeys(warnings))
 
 
@@ -115,15 +104,14 @@ def average_stack(images: List[np.ndarray]) -> np.ndarray:
     точность, которую нельзя терять округлением.
     """
     if len(images) < 2:
-        raise ValueError("для усреднения нужно минимум 2 кадра")
+        raise ValueError(t("avg.min"))
     if len(images) > MAX_AVERAGE:
-        raise ValueError(f"для усреднения достаточно {MAX_AVERAGE} кадров, загружено {len(images)}")
+        raise ValueError(t("avg.max", max=MAX_AVERAGE, n=len(images)))
     shape = images[0].shape
     for img in images[1:]:
         if img.shape != shape:
             raise ValueError(
-                f"кадры разного размера: {shape[1]}×{shape[0]} и {img.shape[1]}×{img.shape[0]} — "
-                "усредняются только кадры с одной камеры и одними настройками"
+                t("avg.shape", a=f"{shape[1]}×{shape[0]}", b=f"{img.shape[1]}×{img.shape[0]}")
             )
     trim = len(images) >= 4
     out = np.empty(shape, np.float32)

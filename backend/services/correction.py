@@ -15,6 +15,7 @@ from adapters import image_io
 from core import color, metrics
 from core.flat_field import FlatProfile, apply_profile, build_profile, match_geometry, to_dtype
 from schemas.processing import CorrectionSettings
+from i18n import t
 
 PREVIEW_MAX_SIDE = 1600
 SOFTWARE = "MicroCleaner 2.0"
@@ -37,7 +38,7 @@ def processing_log(
         "bright_field": bright,
         "dark_field": dark,
         "settings": settings.model_dump(),
-        "note": "Исследовательская обработка. Исходный файл не изменяется и хранится отдельно.",
+        "note": t("log.note"),
     }
     estimated = (bright or {}).get("estimated")
     if estimated:
@@ -56,16 +57,15 @@ class Correction:
 
 def calibration_warnings(raw: np.ndarray, bright: np.ndarray, dark: Optional[np.ndarray]) -> List[str]:
     warnings = []
-    for label, calib in (("светлого поля", bright), ("темнового кадра", dark)):
+    for what, calib in ((t("cal.what.bright"), bright), (t("cal.what.dark"), dark)):
         if calib is None:
             continue
         if calib.shape[:2] != raw.shape[:2]:
             warnings.append(
-                f"Размер {label} {calib.shape[1]}×{calib.shape[0]} не совпадает со снимком "
-                f"{raw.shape[1]}×{raw.shape[0]} — кадр масштабирован"
+                t("cal.size", what=what, cw=calib.shape[1], ch=calib.shape[0], rw=raw.shape[1], rh=raw.shape[0])
             )
         if (calib.ndim == 3) != (raw.ndim == 3):
-            warnings.append(f"Число каналов {label} отличается от снимка — каналы приведены")
+            warnings.append(t("cal.channels", what=what))
     return warnings
 
 

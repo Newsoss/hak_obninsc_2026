@@ -246,3 +246,15 @@ def test_verify_on_reference():
     specimen[100:140, 100:140] = (150, 60, 120)
     own = client.post("/api/verify", files={"file": ("mine.png", image_io.encode_image(specimen, "png")[0])}).json()
     assert own["specimen"] == "mine.png" and own["passed"] is True
+
+
+def test_messages_follow_accept_language():
+    en = {"Accept-Language": "en-US,en;q=0.9"}
+    response = client.post("/api/frames", files={"file": ("x.gif", b"GIF89a")}, headers=en)
+    assert response.status_code == 400 and "is not supported" in response.json()["detail"]
+    ru = client.post("/api/frames", files={"file": ("x.gif", b"GIF89a")})
+    assert "не поддерживается" in ru.json()["detail"]
+    sample = client.post("/api/frames?role=bright", files={"file": ("s.png", demo_png("sample-1"))}, headers=en).json()
+    assert any("fine details" in c for c in sample["checks"])
+    verify = client.post("/api/verify", headers=en).json()
+    assert verify["verdict"].startswith("The method is correct") and verify["rows"][1]["id"] == "flat"

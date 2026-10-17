@@ -22,6 +22,15 @@ export default {
         bad: token('bad'),
         stage: token('stage'),
       },
+      // Минимальные закругления по всему сайту; rounded-full (кружки, счётчики) не трогаем
+      borderRadius: {
+        sm: '2px',
+        DEFAULT: '3px',
+        md: '4px',
+        lg: '4px',
+        xl: '5px',
+        '2xl': '6px',
+      },
       fontFamily: {
         sans: ['system-ui', '-apple-system', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
         mono: ['ui-monospace', 'Consolas', 'monospace'],

@@ -9,6 +9,7 @@ import numpy as np
 import tifffile
 
 from core.color import white_level
+from i18n import t
 
 SUPPORTED_EXTENSIONS = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp")
 MAX_PIXELS = 120_000_000
@@ -36,7 +37,7 @@ def _normalize_layout(image: np.ndarray) -> np.ndarray:
         elif image.shape[2] > 4:
             image = image[0]
     if image.ndim not in (2, 3):
-        raise ValueError("неподдерживаемая размерность изображения")
+        raise ValueError(t("io.dims"))
     return image
 
 
@@ -52,9 +53,9 @@ def read_image(data: bytes, filename: str) -> np.ndarray:
     """Байты файла -> numpy (H, W) или (H, W, 3) в RGB с исходной битностью."""
     ext = PurePath(filename or "").suffix.lower()
     if ext and ext not in SUPPORTED_EXTENSIONS:
-        raise ValueError(f"{filename}: формат {ext} не поддерживается")
+        raise ValueError(t("io.ext", name=filename, ext=ext))
     if not data:
-        raise ValueError(f"{filename}: пустой файл")
+        raise ValueError(t("io.empty", name=filename))
 
     try:
         if ext in (".tif", ".tiff"):
@@ -65,12 +66,12 @@ def read_image(data: bytes, filename: str) -> np.ndarray:
                 code = cv2.COLOR_BGRA2RGB if image.shape[2] == 4 else cv2.COLOR_BGR2RGB
                 image = cv2.cvtColor(image, code)
     except Exception as exc:  # noqa: BLE001 — любые ошибки декодеров
-        raise ValueError(f"{filename}: файл поврежден ({exc})") from exc
+        raise ValueError(t("io.corrupt", name=filename, error=exc)) from exc
 
     if image is None or image.size == 0:
-        raise ValueError(f"{filename}: не удалось декодировать изображение")
+        raise ValueError(t("io.decode", name=filename))
     if image.shape[0] * image.shape[1] > MAX_PIXELS:
-        raise ValueError(f"{filename}: изображение слишком большое")
+        raise ValueError(t("io.too_big", name=filename))
 
     image = _normalize_dtype(_normalize_layout(image))
     return np.ascontiguousarray(image)
@@ -128,7 +129,7 @@ def pixel_size(meta: Dict) -> Optional[str]:
         return None
     um_per_unit = RESOLUTION_UNITS.get(meta.get("resolution_unit", 2))
     if um_per_unit:
-        return f"{um_per_unit / resolution[0]:.4g} мкм"
+        return f"{um_per_unit / resolution[0]:.4g} {t('unit.um')}"
     unit = (meta.get("ImageJ") or {}).get("unit")
     return f"{1 / resolution[0]:.4g} {unit}" if unit else None
 
