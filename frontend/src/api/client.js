@@ -99,7 +99,7 @@ export async function verifyMethod(file) {
   return (await request('/api/verify', { method: 'POST', body })).json();
 }
 
-/** Светлое поле, оцененное как медиана по серии снимков (когда его не снимали). */
+/** Светлое поле, оцененное по серии снимков (когда его не снимали). */
 export async function estimateFlat(files) {
   const body = new FormData();
   files.forEach((file) => body.append('files', file));

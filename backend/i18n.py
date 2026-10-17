@@ -70,11 +70,11 @@ MESSAGES = {
         "by blurring (pseudo flat-field). Large objects and smooth staining gradients may partly "
         "end up in the “background”. For an exact correction, take a bright field.",
     ),
-    "est.median_note": (
-        "Светлое поле не снималось, а оценено как медиана по {count} снимкам серии. "
-        "Оценка верна, если на каждом участке кадра в большинстве снимков нет препарата.",
-        "No bright field was taken, it was estimated as the median of {count} images of the series. "
-        "The estimate is valid if most images have no specimen at each part of the frame.",
+    "est.series_note": (
+        "Светлое поле не снималось, а оценено по {count} снимкам серии: в каждой точке кадра взят фон — "
+        "значение, где нет препарата. Оценка верна, если препарат на снимках лежит в разных местах.",
+        "No bright field was taken, it was estimated from {count} images of the series: at each point the "
+        "background value (where there is no specimen) is used. Valid if the specimen is in different places.",
     ),
     "est.min_series": (
         "для оценки по серии нужно минимум {min} снимков, загружено {n}",
@@ -95,9 +95,9 @@ MESSAGES = {
         "too often. Add images of other fields of view or take a bright field.",
     ),
     "est.frame_gaussian": ("оценка по снимку (размытие Гаусса)", "estimated from the image (Gaussian blur)"),
-    "est.frame_median": (
-        "оценка по серии ({count} снимков, медиана)",
-        "estimated from the series ({count} images, median)",
+    "est.frame_series": (
+        "оценка по серии ({count} снимков)",
+        "estimated from the series ({count} images)",
     ),
     "avg.min": ("для усреднения нужно минимум 2 кадра", "averaging needs at least 2 frames"),
     "avg.max": (

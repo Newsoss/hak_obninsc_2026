@@ -214,7 +214,7 @@ def test_flat_from_series_used_for_batch():
     assert too_few.status_code == 400 and "минимум 5" in too_few.json()["detail"]
 
     flat = client.post("/api/flat/series", files=[("files", (f"{i}.png", d)) for i, d in enumerate(series)]).json()
-    assert flat["estimated"]["method"] == "median" and flat["estimated"]["count"] == 6
+    assert flat["estimated"]["method"] == "series" and flat["estimated"]["count"] == 6
     response = client.post("/api/process/file", files={"raw": ("s1.png", series[0])}, data={"bright_id": flat["id"]})
     report = json.loads(response.headers["x-correction-report"])
     assert report["after"]["nonuniformity"] < report["before"]["nonuniformity"] / 5

@@ -230,21 +230,21 @@ async def estimate_flat_from_series(
     files: List[UploadFile] = File(..., description=f"Снимки серии, минимум {estimate.MIN_SERIES}"),
 ):
     """
-    Оценивает светлое поле как медиану по серии снимков разных полей зрения.
+    Оценивает светлое поле по серии снимков разных полей зрения (фоновое значение в каждой точке).
     Нужна, когда светлое поле не снимали. Результат — обычный кадр с id для обработки серии.
     """
     _check_count(files)
     images = [(await _read(f))[0] for f in files]
     try:
-        flat, checks = await run_in_threadpool(estimate.median_flat, images)
+        flat, checks = await run_in_threadpool(estimate.series_flat, images)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from None
     count = min(len(images), estimate.MAX_SERIES)
-    note = t("est.median_note", count=count)
+    note = t("est.series_note", count=count)
     frame = store.put(
-        t("est.frame_median", count=count),
+        t("est.frame_series", count=count),
         flat,
-        meta={"estimated": {"method": "median", "count": count, "note": note}},
+        meta={"estimated": {"method": "series", "count": count, "note": note}},
     )
     return _frame_info(frame, checks)
 

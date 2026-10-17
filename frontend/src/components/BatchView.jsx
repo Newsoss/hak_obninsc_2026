@@ -10,7 +10,7 @@ import FrameSlot from './FrameSlot';
 import { Button, Section, Segmented, Spinner } from './ui';
 
 const CONCURRENCY = 3;
-const MIN_SERIES = 5; // столько снимков нужно, чтобы оценить светлое поле медианой
+const MIN_SERIES = 5; // столько снимков нужно, чтобы оценить светлое поле по серии
 const FORMATS = ['', 'tiff', 'png', 'jpeg'];
 
 let nextId = 1;
@@ -131,7 +131,7 @@ export default function BatchView({
       return list.filter((x) => x.id !== id);
     });
 
-  /** Светлое поле как медиана по снимкам серии — когда его не снимали. */
+  /** Светлое поле по снимкам серии (фон в каждой точке) — когда его не снимали. */
   const estimateFromSeries = async () => {
     const files = itemsRef.current.map((it) => it.file);
     if (files.length < MIN_SERIES) {

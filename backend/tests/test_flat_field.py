@@ -129,24 +129,24 @@ def _series(n):
     ]
 
 
-def test_median_flat_matches_real_calibration():
+def test_series_flat_matches_real_calibration():
     from core import estimate
     from core.flat_field import apply_profile, build_profile, to_dtype
 
     series = _series(10)
-    flat, warnings = estimate.median_flat(series)
+    flat, warnings = estimate.series_flat(series)
     estimated = to_dtype(apply_profile(series[0], build_profile(flat)), np.uint8)
     real = flat_field_correct(series[0], demo.generate("bright"), demo.generate("dark"))
     assert warnings == []
     assert metrics.uniformity(estimated)["nonuniformity"] < metrics.uniformity(real)["nonuniformity"] + 1
 
 
-def test_median_flat_needs_enough_images():
+def test_series_flat_needs_enough_images():
     from core import estimate
 
     with pytest.raises(ValueError):
-        estimate.median_flat(_series(3))
-    _, warnings = estimate.median_flat(_series(5))
+        estimate.series_flat(_series(3))
+    _, warnings = estimate.series_flat(_series(5))
     assert any("Снимков всего 5" in w for w in warnings)
 
 
@@ -158,3 +158,19 @@ def test_gaussian_flat_is_approximate_but_helps():
     corrected = to_dtype(apply_profile(raw, build_profile(estimate.gaussian_flat(raw))), np.uint8)
     before, after = metrics.uniformity(raw), metrics.uniformity(corrected)
     assert after["nonuniformity"] < before["nonuniformity"] / 4
+
+
+def test_series_flat_has_no_cell_ghosts():
+    # 6 снимков: часть клеток лежит в одном месте на половине снимков. Медиана оставляла
+    # на этих местах «призраки» клеток (худшая ошибка ~14%), фоновое значение — нет.
+    from core import estimate
+    from core.flat_field import apply_profile, build_profile
+
+    series = _series(6)
+    dark = demo.generate("dark")
+    real = apply_profile(series[0], build_profile(demo.generate("bright"), dark))
+    flat, _ = estimate.series_flat(series)
+    corrected = apply_profile(series[0], build_profile(flat, dark))
+    corrected *= np.median(real) / np.median(corrected)
+    worst = np.percentile(np.abs(corrected - real), 99.9) / 255 * 100
+    assert worst < 8

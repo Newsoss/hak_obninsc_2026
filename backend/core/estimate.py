@@ -4,9 +4,13 @@
 - gaussian_flat: по одному снимку. Фон = сильно размытый снимок, из которого
   исключены объекты препарата. Приблизительно: крупные объекты и плавные
   перепады окраски могут частично попасть в «фон».
-- median_flat: по серии. В каждой точке кадра берется медиана по снимкам —
-  если на большинстве снимков в этой точке нет препарата, получается чистый
-  фон, то есть само освещение (виньетирование, пыль, оттенок лампы).
+- series_flat: по серии. В каждой точке кадра берется «фоновое» значение:
+  на светлом поле препарат всегда темнее фона, поэтому берется второе по
+  яркости значение среди снимков (одно самое яркое отбрасывается как выброс).
+  Клетка попадет в оценку, только если лежит в этой точке почти на всех
+  снимках. Медиана так не умеет: ей хватает клетки на половине снимков, и на
+  результате появляются «призраки» клеток. Для флуоресценции (светлые объекты
+  на темном фоне) направление определяется автоматически.
 """
 from typing import List, Tuple
 
@@ -54,13 +58,13 @@ def gaussian_flat(image: np.ndarray) -> np.ndarray:
     return cv2.GaussianBlur(background, (0, 0), sigma).astype(np.float32)
 
 
-def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
-    """Светлое поле как медиана серии. Возвращает (оценка, предупреждения)."""
+def series_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
+    """Светлое поле по серии снимков. Возвращает (оценка, предупреждения)."""
     if len(images) < MIN_SERIES:
         raise ValueError(t("est.min_series", min=MIN_SERIES, n=len(images)))
     warnings: List[str] = []
     if len(images) > MAX_SERIES:
-        # Равномерная выборка: медиане хватает, а память не раздувается
+        # Равномерная выборка: для оценки хватает, а память не раздувается
         step = len(images) / MAX_SERIES
         images = [images[int(i * step)] for i in range(MAX_SERIES)]
 
@@ -81,7 +85,14 @@ def median_flat(images: List[np.ndarray]) -> Tuple[np.ndarray, List[str]]:
             small = to_luminance(small)
         stack.append(small)
 
-    flat = np.median(np.stack(stack), axis=0).astype(np.float32)
+    stack = np.stack(stack)
+    lum = to_luminance(stack) if color else stack
+    middle = np.median(lum, axis=0)
+    # Объекты темнее фона (светлое поле) или светлее (флуоресценция)? Смотрим, в какую
+    # сторону от медианы распределение по снимкам «вытянуто» сильнее.
+    dark_objects = np.median(middle - lum.min(axis=0)) >= np.median(lum.max(axis=0) - middle)
+    rank = len(stack) - 2 if dark_objects else 1
+    flat = np.sort(stack, axis=0)[rank].astype(np.float32)
     flat = cv2.GaussianBlur(flat, (0, 0), 1.0)
 
     count = len(stack)
