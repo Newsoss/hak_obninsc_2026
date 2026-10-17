@@ -383,8 +383,8 @@ export default function App() {
       />
 
       {tab === 'single' && (
-        <main className="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <aside className="space-y-5 border-b border-line bg-surface p-4 lg:w-72 lg:shrink-0 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-visible">
+          <aside className="shrink-0 space-y-5 border-b border-line bg-surface p-4 lg:w-72 lg:overflow-y-auto lg:border-b-0 lg:border-r">
             <Section title={t('section.files')}>
               <FrameSlot tone="raw" title={t('slot.raw')} frame={frames.raw} busy={uploading.raw} onFile={(f) => setFrame('raw', f)} />
               <FrameSlot tone="bright" title={t('slot.bright')} frame={frames.bright} busy={uploading.bright}
@@ -404,7 +404,7 @@ export default function App() {
             />
           </aside>
 
-          <section className="order-first flex min-h-[60vh] min-w-0 flex-1 flex-col gap-2 p-3 lg:order-none lg:min-h-0">
+          <section className="order-first flex min-h-[60vh] min-w-0 flex-1 shrink-0 flex-col gap-2 p-3 lg:order-none lg:min-h-0 lg:shrink">
             <div className="flex flex-wrap items-center gap-2">
               <Segmented options={VIEW_MODES.map((value) => ({ value, label: t(`view.${value}`) }))} value={mode} onChange={setMode} />
               <div className="flex items-center gap-0.5 text-xs text-muted">

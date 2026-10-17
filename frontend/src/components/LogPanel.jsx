@@ -51,10 +51,13 @@ export default function LogPanel({ logs, height, onResize, onClear, onClose }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2 font-mono text-xs leading-5">
         {logs.length === 0 && <div className="text-faint">{t('logs.empty')}</div>}
         {logs.map((l) => (
-          <div key={l.id} className="flex gap-3">
+          <div key={l.id} className="flex gap-2 sm:gap-3">
             <span className="shrink-0 text-faint">{time(l.time)}</span>
-            <span className={`w-10 shrink-0 ${LEVELS[l.level].className}`}>{LEVELS[l.level].label}</span>
-            <span className="min-w-0 whitespace-pre-wrap break-words">{l.text}</span>
+            {/* На телефоне колонку уровня прячем, а уровень видно по цвету текста */}
+            <span className={`hidden w-10 shrink-0 sm:inline ${LEVELS[l.level].className}`}>{LEVELS[l.level].label}</span>
+            <span className={`min-w-0 whitespace-pre-wrap break-words ${l.level === 'info' ? '' : `${LEVELS[l.level].className} sm:text-inherit`}`}>
+              {l.text}
+            </span>
           </div>
         ))}
         <div ref={end} />

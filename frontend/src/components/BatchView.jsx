@@ -389,8 +389,8 @@ export default function BatchView({
                 <tr>
                   <th className="px-3 py-2 font-medium">{t('batch.th_file')}</th>
                   <th className="hidden w-20 px-3 py-2 font-medium sm:table-cell">{t('batch.th_size')}</th>
-                  <th className="w-20 px-3 py-2 font-medium">{t('batch.th_time')}</th>
-                  <th className="w-24 px-3 py-2 font-medium">{t('batch.th_status')}</th>
+                  <th className="hidden w-20 px-3 py-2 font-medium sm:table-cell">{t('batch.th_time')}</th>
+                  <th className="hidden w-24 px-3 py-2 font-medium sm:table-cell">{t('batch.th_status')}</th>
                   <th className="w-40 px-3 py-2" />
                 </tr>
               </thead>
@@ -404,16 +404,22 @@ export default function BatchView({
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded border border-line bg-raised">
                             {preview && <img src={preview} alt="" className="h-full w-full object-cover" />}
                           </div>
-                          <span className="truncate" title={it.error || it.path}>
-                            {it.path}
-                          </span>
+                          <div className="min-w-0">
+                            <div className="truncate" title={it.error || it.path}>
+                              {it.path}
+                            </div>
+                            {/* На телефоне статус — под именем, отдельных колонок не хватает места */}
+                            <div className="text-xs sm:hidden">
+                              <Status item={it} />
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="hidden whitespace-nowrap px-3 text-muted sm:table-cell">{formatBytes(it.file.size)}</td>
-                      <td className="whitespace-nowrap px-3 tabular-nums text-muted">
+                      <td className="hidden whitespace-nowrap px-3 tabular-nums text-muted sm:table-cell">
                         {it.result ? t('batch.ms', { ms: it.result.report.elapsed_ms.toFixed(0) }) : '—'}
                       </td>
-                      <td className="whitespace-nowrap px-3 text-xs">
+                      <td className="hidden whitespace-nowrap px-3 text-xs sm:table-cell">
                         <Status item={it} />
                       </td>
                       <td className="whitespace-nowrap px-3 text-right text-xs">

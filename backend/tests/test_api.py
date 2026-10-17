@@ -220,6 +220,23 @@ def test_flat_from_series_used_for_batch():
     assert report["after"]["nonuniformity"] < report["before"]["nonuniformity"] / 5
 
 
+def test_long_series_is_sampled_with_dark():
+    from core import estimate
+
+    rng = np.random.default_rng(5)
+    frames = [
+        image_io.encode_image((200 + rng.integers(-20, 20, (24, 32))).astype(np.uint8), "png")[0]
+        for _ in range(estimate.MAX_SERIES + 6)
+    ]
+    dark = client.post(
+        "/api/frames?role=dark", files={"file": ("d.png", image_io.encode_image(np.full((24, 32), 8, np.uint8), "png")[0])}
+    ).json()
+    flat = client.post(
+        "/api/flat/series", files=[("files", (f"{i}.png", d)) for i, d in enumerate(frames)], data={"dark_id": dark["id"]}
+    ).json()
+    assert flat["estimated"]["count"] == estimate.MAX_SERIES
+
+
 def test_average_calibration_frames():
     from core import demo as demo_core
 
