@@ -106,31 +106,50 @@ export default function CompareViewer({
     });
   }, [viewKey, needDetail, preview]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Колесо мыши: зум с сохранением точки под курсором
+  /**
+   * Координата x внутри панели. В режиме «рядом» панелей две; курсор за краем окна
+   * (при перетаскивании) остается в крайней панели, а не «перескакивает» в соседнюю.
+   */
+  const paneX = (clientX, rect) => {
+    const x = clientX - rect.left;
+    const pane = clamp(Math.floor(x / (paneW + GAP)), 0, panes - 1);
+    return x - pane * (paneW + GAP);
+  };
+
+  // Колесо и жесты тачпада. Браузер присылает их одним событием wheel:
+  // - колесо мыши (крупные шаги по вертикали) и щипок (ctrlKey) — масштаб к курсору;
+  // - прокрутка двумя пальцами (мелкие шаги, есть deltaX) — сдвиг картинки при увеличении,
+  //   а без увеличения горизонтальный свайп двигает линию «до/после».
   useEffect(() => {
     const el = box.current;
     if (!el) return undefined;
     const onWheel = (e) => {
       if (!preview) return;
       e.preventDefault();
+      const touchpad = !e.ctrlKey && e.deltaMode === 0 && (e.deltaX !== 0 || Math.abs(e.deltaY) < 50);
+      if (touchpad) {
+        if (zoom > 1) setPan((p) => clampPan({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+        else if (mode === 'split' && Math.abs(e.deltaX) > Math.abs(e.deltaY))
+          setSplit((s) => clamp(s - (e.deltaX / stageW) * 100, 0, 100));
+        return;
+      }
       const rect = el.getBoundingClientRect();
-      const local = (e.clientX - rect.left) % (paneW + GAP);
-      const cx = local - paneW / 2;
+      const cx = paneX(e.clientX, rect) - paneW / 2;
       const cy = e.clientY - rect.top - paneH / 2;
-      const next = clamp(zoom * Math.exp(-e.deltaY * 0.0015), 1, maxZoom);
+      const speed = e.ctrlKey ? 0.01 : 0.0015; // щипок присылает мелкие шаги
+      const next = clamp(zoom * Math.exp(-e.deltaY * speed), 1, maxZoom);
       const k = next / zoom;
       onZoom(next);
       setPan((p) => clampPan({ x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }, next));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [preview, zoom, maxZoom, paneW, paneH, clampPan, onZoom]);
+  }, [preview, zoom, maxZoom, mode, stageW, paneW, paneH, panes, clampPan, onZoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Экранная точка → координаты снимка (0..1) с учетом панели в режиме «рядом». */
   const toImage = (clientX, clientY) => {
     const rect = box.current.getBoundingClientRect();
-    const lx = (clientX - rect.left) % (paneW + GAP);
-    return { u: (lx - stageLeft) / stageW, v: (clientY - rect.top - stageTop) / stageH };
+    return { u: (paneX(clientX, rect) - stageLeft) / stageW, v: (clientY - rect.top - stageTop) / stageH };
   };
 
   const onPointerDown = (e) => {
@@ -216,7 +235,8 @@ export default function CompareViewer({
         onZoom(1);
         setPan({ x: 0, y: 0 });
       }}
-      className={`relative min-h-[300px] flex-1 touch-none overflow-hidden rounded-md border border-line bg-stage ${cursor}`}
+      onDragStart={(e) => e.preventDefault()}
+      className={`relative min-h-[300px] flex-1 touch-none select-none overflow-hidden overscroll-none rounded-md border border-line bg-stage ${cursor}`}
     >
       {preview && mode === 'split' && (
         <div className="absolute inset-0">
@@ -229,10 +249,15 @@ export default function CompareViewer({
               {img(preview.before, 'До коррекции')}
               {detailImg(detail?.before)}
             </div>
-            <div className="absolute inset-y-0 z-10 w-px -translate-x-1/2 bg-white" style={{ left: `${split}%` }}>
+            {/* Линию можно схватить в любом месте: невидимая полоса шириной 24 px */}
+            <div
+              data-handle
+              className="absolute inset-y-0 z-10 w-6 -translate-x-1/2 cursor-ew-resize"
+              style={{ left: `${split}%` }}
+            >
+              <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-white" />
               <div
-                data-handle
-                className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize items-center justify-center rounded-full border border-black/20 bg-white text-zinc-600 shadow"
+                className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-black/20 bg-white text-zinc-600 shadow"
               >
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 7l-5 5 5 5M15 7l5 5-5 5" />
