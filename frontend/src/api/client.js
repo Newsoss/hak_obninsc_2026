@@ -119,7 +119,7 @@ export async function cropRegion(refs, rect, signal) {
 export async function processFile(file, { brightId, darkId, settings, format, thumbs = false }) {
   const body = new FormData();
   body.append('raw', file);
-  body.append('bright_id', brightId);
+  if (brightId) body.append('bright_id', brightId); // без него — оценка по каждому снимку
   if (darkId) body.append('dark_id', darkId);
   body.append('settings', JSON.stringify(settings));
   if (format) body.append('format', format);

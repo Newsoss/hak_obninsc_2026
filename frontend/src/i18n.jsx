@@ -125,6 +125,29 @@ const DICT = {
   'batch.title': ['Пакетная обработка', 'Batch processing'],
   'batch.calibration': ['Калибровка', 'Calibration'],
   'batch.bright_empty': ['Нет — оценим по серии (от {min} снимков)', 'None — will be estimated from the series ({min}+ images)'],
+  'batch.mode_shared': ['Общая', 'Shared'],
+  'batch.mode_per_image': ['Для каждого снимка', 'Per image'],
+  'batch.mode_shared_title': [
+    'Одно светлое поле на всю серию: загруженное или оцененное по серии',
+    'One bright field for the whole series: uploaded or estimated from the series',
+  ],
+  'batch.mode_per_image_title': [
+    'Светлое поле строится отдельно по каждому снимку',
+    'A bright field is built separately from each image',
+  ],
+  'batch.per_image_note': [
+    'Светлое поле оценивается по каждому снимку отдельно. Калибровка не нужна, снимки могут быть с разных микроскопов, но коррекция приблизительная: пыль на оптике не убирается.',
+    'The bright field is estimated from each image separately. No calibration is needed and images may come from different microscopes, but the correction is approximate: dust on the optics is not removed.',
+  ],
+  'batch.log_start_per_image': [
+    'Пакет: обработка файлов — {n}, светлое поле оценивается по каждому снимку{dark}',
+    'Batch: processing {n} file(s), bright field estimated from each image{dark}',
+  ],
+  'batch.summary_per_image': ['светлое поле: по каждому снимку', 'bright field: per image'],
+  'journal.per_image': [
+    'Светлое поле не снималось: оно оценено по каждому снимку отдельно размытием. Коррекция приблизительная.',
+    'No bright field was taken: it was estimated from each image separately by blurring. The correction is approximate.',
+  ],
   'batch.estimate': ['Оценить по серии', 'Estimate from series'],
   'batch.estimate_title': [
     'Светлое поле = медиана по снимкам серии. Работает, если препарат на снимках в разных местах',

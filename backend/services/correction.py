@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from adapters import image_io
-from core import color, metrics
+from core import color, estimate, metrics
 from core.flat_field import FlatProfile, apply_profile, build_profile, match_geometry, to_dtype
 from schemas.processing import CorrectionSettings
 from i18n import t
@@ -282,11 +282,15 @@ class CorrectionService:
         calibration: Optional[Dict] = None,
     ) -> io.BytesIO:
         """
-        Серия снимков одним профилем -> ZIP: результаты и processing.json.
+        Серия снимков -> ZIP: результаты и processing.json.
+        С bright — одна калибровка на всю серию. Без него светлое поле оценивается
+        по каждому снимку отдельно (приблизительно, это пишется в журнал).
         calibration — {"bright_field": {...}, "dark_field": {...} | None}: имена и SHA-256.
         """
         calibration = calibration or {"bright_field": None, "dark_field": None}
-        profile = self.profile(None, bright, dark, settings)
+        per_image = bright is None
+        estimated = {"name": t("est.frame_gaussian"), "estimated": {"method": "gaussian", "note": t("est.gaussian_note")}}
+        profile = None if per_image else self.profile(None, bright, dark, settings)
         files_log = []
         archive = io.BytesIO()
         used_names = set()
@@ -299,9 +303,12 @@ class CorrectionService:
                     meta = image_io.read_metadata(data, name)
                     if meta:
                         source["metadata"] = meta
-                    result = self.correct(raw, profile, settings)
+                    if per_image:
+                        file_profile = self.profile(None, estimate.gaussian_flat(raw), dark, settings)
+                    result = self.correct(raw, file_profile if per_image else profile, settings)
                     out_fmt = fmt or image_io.format_for(name)
-                    log = processing_log(source, calibration["bright_field"], calibration["dark_field"], settings)
+                    bright_log = estimated if per_image else calibration["bright_field"]
+                    log = processing_log(source, bright_log, calibration["dark_field"], settings)
                     encoded, _ = image_io.encode_image(
                         result.image, out_fmt, result.white, json.dumps(log), meta
                     )
@@ -318,7 +325,10 @@ class CorrectionService:
                     files_log.append(entry)
                 except ValueError as exc:
                     files_log.append({"source": source, "error": str(exc)})
-            log = processing_log(None, calibration["bright_field"], calibration["dark_field"], settings)
+            log = processing_log(
+                None, estimated if per_image else calibration["bright_field"], calibration["dark_field"], settings
+            )
+            log["calibration"] = "per_image" if per_image else "shared"
             del log["source"]
             log["files"] = files_log
             zf.writestr("processing.json", json.dumps(log, ensure_ascii=False, indent=2))

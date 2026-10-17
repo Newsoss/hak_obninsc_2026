@@ -23,10 +23,11 @@ export function Button({ variant = 'secondary', size = 'md', icon: Icon, busy, c
 export function Segmented({ options, value, onChange, className = '' }) {
   return (
     <div className={`inline-flex overflow-hidden rounded-md border border-line bg-surface ${className}`}>
-      {options.map(({ value: v, label }, i) => (
+      {options.map(({ value: v, label, title }, i) => (
         <button
           key={v}
           type="button"
+          title={title}
           onClick={() => onChange(v)}
           className={`focus-ring flex-1 whitespace-nowrap px-3 py-1 text-xs ${i ? 'border-l border-line' : ''} ${
             value === v ? 'bg-raised font-medium text-ink' : 'text-muted hover:text-ink'

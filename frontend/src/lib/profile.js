@@ -73,13 +73,17 @@ export function fileLog({ source, result, frames, settings }) {
 }
 
 /** Журнал серии: калибровка, настройки и итог по каждому файлу. */
-export function batchLog(items, frames, settings) {
+export function batchLog(items, frames, settings, mode = 'shared') {
+  // «Для каждого снимка» — светлое поле у каждого файла свое, оценка приблизительная
+  const perImage = mode === 'per_image';
+  const bright = perImage ? { estimated: { method: 'gaussian', note: translate('journal.per_image') } } : frames.bright;
   return pretty({
     software: SOFTWARE,
     method: 'flat-field correction',
     formula: FORMULA,
     created: new Date().toISOString(),
-    bright_field: calibration(frames.bright),
+    calibration: perImage ? 'per_image' : 'shared',
+    bright_field: perImage ? null : calibration(frames.bright),
     dark_field: calibration(frames.dark),
     settings,
     files: items.map((it) => ({
@@ -90,7 +94,7 @@ export function batchLog(items, frames, settings) {
       elapsed_ms: it.result?.report?.elapsed_ms ?? null,
       error: it.error ?? null,
     })),
-    ...approximate(frames.bright),
+    ...approximate(bright),
   });
 }
 

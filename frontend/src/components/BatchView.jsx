@@ -7,7 +7,7 @@ import { PRESETS } from '../lib/presets';
 import { batchLog, fileLog, jsonBlob, logName } from '../lib/profile';
 import { currentLanguage, useI18n } from '../i18n';
 import FrameSlot from './FrameSlot';
-import { Button, Section, Spinner } from './ui';
+import { Button, Section, Segmented, Spinner } from './ui';
 
 const CONCURRENCY = 3;
 const MIN_SERIES = 5; // столько снимков нужно, чтобы оценить светлое поле медианой
@@ -80,6 +80,9 @@ export default function BatchView({
   const [over, setOver] = useState(false);
   const [elapsed, setElapsed] = useState(null);
   const [estimating, setEstimating] = useState(false);
+  // shared — одна калибровка на серию; per_image — светлое поле по каждому снимку
+  const [calibMode, setCalibMode] = useState('shared');
+  const perImage = calibMode === 'per_image';
   const stopRef = useRef(false);
   const fileInput = useRef(null);
   const folderInput = useRef(null);
@@ -154,20 +157,20 @@ export default function BatchView({
     const pending = itemsRef.current.filter((it) => it.status !== 'done');
     const queue = pending.length ? pending : [...itemsRef.current];
     if (!queue.length) return;
-    // Светлого поля нет — оцениваем его по самой серии
-    const bright = frames.bright ?? (await estimateFromSeries());
-    if (!bright) return;
+    // Общая калибровка: светлого поля нет — оцениваем его по самой серии.
+    // Для каждого снимка: светлое поле не передаем, сервер оценит его по каждому файлу.
+    const bright = perImage ? null : frames.bright ?? (await estimateFromSeries());
+    if (!perImage && !bright) return;
     stopRef.current = false;
     setRunning(true);
     const started = performance.now();
+    const darkNote = frames.dark ? t('batch.log_start_dark', { name: frames.dark.name }) : '';
     log(
-      t('batch.log_start', {
-        n: queue.length,
-        bright: bright.name,
-        dark: frames.dark ? t('batch.log_start_dark', { name: frames.dark.name }) : '',
-      }),
+      perImage
+        ? t('batch.log_start_per_image', { n: queue.length, dark: darkNote })
+        : t('batch.log_start', { n: queue.length, bright: bright.name, dark: darkNote }),
     );
-    const options = { brightId: bright.id, darkId: frames.dark?.id, settings, format, thumbs: true };
+    const options = { brightId: bright?.id, darkId: frames.dark?.id, settings, format, thumbs: true };
     const used = { frames: { bright, dark: frames.dark }, settings };
 
     const worker = async () => {
@@ -216,7 +219,7 @@ export default function BatchView({
     if (!rows.length) return null;
     const preset = presetId ? t(`preset.${presetId}`) : t('preset.custom');
     const calib = [
-      frames.bright && t('batch.summary_bright', { name: frames.bright.name }),
+      perImage ? t('batch.summary_per_image') : frames.bright && t('batch.summary_bright', { name: frames.bright.name }),
       frames.dark && t('batch.summary_dark', { name: frames.dark.name }),
       preset,
       new Date().toLocaleString(currentLanguage() === 'en' ? 'en-GB' : 'ru-RU'),
@@ -246,7 +249,7 @@ export default function BatchView({
         entries[name] = [new Uint8Array(buffers[i]), { level: 0 }];
         entries[logName(name)] = new TextEncoder().encode(itemLog(it));
       });
-      entries['processing.json'] = new TextEncoder().encode(batchLog(items, frames, settings));
+      entries['processing.json'] = new TextEncoder().encode(batchLog(items, frames, settings, calibMode));
       const summary = await buildSummary(finished);
       if (summary) entries['summary.png'] = [new Uint8Array(await summary.arrayBuffer()), { level: 0 }];
       saveBlob(new Blob([zipSync(entries)], { type: 'application/zip' }), 'microcleaner_batch.zip');
@@ -274,12 +277,25 @@ export default function BatchView({
     <div className="mx-auto grid w-full max-w-5xl gap-6 p-4 lg:grid-cols-[260px_1fr] lg:p-6">
       <aside className="space-y-5">
         <Section title={t('batch.calibration')}>
+          <Segmented
+            className="w-full"
+            value={calibMode}
+            onChange={setCalibMode}
+            options={[
+              { value: 'shared', label: t('batch.mode_shared'), title: t('batch.mode_shared_title') },
+              { value: 'per_image', label: t('batch.mode_per_image'), title: t('batch.mode_per_image_title') },
+            ]}
+          />
+          {perImage ? (
+            <p className="text-xs text-muted">{t('batch.per_image_note')}</p>
+          ) : (
           <FrameSlot tone="bright" title={t('slot.bright')} multiple frame={frames.bright} busy={uploading.bright || estimating}
             emptyText={t('batch.bright_empty', { min: MIN_SERIES })}
             onFile={(f) => onFrame('bright', f)} onClear={onClearBright} />
+          )}
           <FrameSlot tone="dark" title={t('slot.dark')} optional multiple frame={frames.dark} busy={uploading.dark}
             onFile={(f) => onFrame('dark', f)} onClear={onClearDark} />
-          {!frames.bright && (
+          {!perImage && !frames.bright && (
             <div className="space-y-1.5">
               <Button size="sm" className="w-full justify-center" onClick={estimateFromSeries}
                 disabled={running || estimating || items.length < MIN_SERIES} busy={estimating}
@@ -330,9 +346,9 @@ export default function BatchView({
               size="sm"
               variant="primary"
               onClick={run}
-              disabled={estimating || !items.length || (!frames.bright && items.length < MIN_SERIES)}
+              disabled={estimating || !items.length || (!perImage && !frames.bright && items.length < MIN_SERIES)}
               title={
-                frames.bright
+                perImage || frames.bright
                   ? undefined
                   : items.length < MIN_SERIES
                     ? t('batch.need_bright', { min: MIN_SERIES })

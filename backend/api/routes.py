@@ -48,17 +48,22 @@ def _frame(frame_id: Optional[str], label: str) -> Optional[Frame]:
         raise HTTPException(404, t("err.not_found", label=label)) from None
 
 
+def _estimated_flat(image, key: str) -> Frame:
+    """Светлое поле, оцененное по самому снимку размытием (приблизительно)."""
+    return Frame(
+        id=f"gauss-{key}",
+        name=t("est.frame_gaussian"),
+        image=estimate.gaussian_flat(image),
+        meta={"estimated": {"method": "gaussian", "note": t("est.gaussian_note")}},
+    )
+
+
 def _pseudo_flat(raw: Frame) -> Frame:
-    """Светлое поле, оцененное по самому снимку. Считается один раз на снимок."""
+    """Светлое поле, оцененное по загруженному снимку. Считается один раз на снимок."""
     if raw.id in _pseudo_flats:
         _pseudo_flats.move_to_end(raw.id)
         return _pseudo_flats[raw.id]
-    flat = Frame(
-        id=f"gauss-{raw.id}",
-        name=t("est.frame_gaussian"),
-        image=estimate.gaussian_flat(raw.image),
-        meta={"estimated": {"method": "gaussian", "note": t("est.gaussian_note")}},
-    )
+    flat = _estimated_flat(raw.image, raw.id)
     _pseudo_flats[raw.id] = flat
     while len(_pseudo_flats) > 16:
         _pseudo_flats.popitem(last=False)
@@ -291,15 +296,23 @@ def crop(req: CropRequest):
 @router.post("/process/file", tags=["Processing"])
 async def process_file(
     raw: UploadFile = File(..., description="Снимок серии"),
-    bright_id: str = Form(..., description="id светлого поля из /frames"),
+    bright_id: Optional[str] = Form(
+        None, description="id светлого поля из /frames; без него — оценка по этому снимку (приблизительно)"
+    ),
     dark_id: Optional[str] = Form(None, description="id темнового кадра из /frames"),
     settings: Optional[str] = Form(None, description="CorrectionSettings в JSON"),
     format: Optional[str] = Form(None, description="tiff | png | jpeg"),
     thumbs: bool = Form(False, description="Подготовить миниатюры до/после для сводки"),
 ):
-    """Один снимок серии с уже загруженной калибровкой — для пакетной обработки с прогрессом."""
+    """
+    Один снимок серии — для пакетной обработки с прогрессом. С bright_id — общая калибровка серии,
+    без него светлое поле оценивается по каждому снимку отдельно.
+    """
     image, source, meta = await _read(raw)
-    bright = _frame(bright_id, t("label.bright"))
+    if bright_id:
+        bright = _frame(bright_id, t("label.bright"))
+    else:
+        bright = await run_in_threadpool(_estimated_flat, image, source["sha256"])
     dark = _frame(dark_id, t("label.dark"))
     if format not in (None, "", *image_io.FORMATS):
         raise HTTPException(422, t("err.format", fmt=format))
@@ -334,7 +347,9 @@ def get_thumbs(thumb_id: str):
 @router.post("/process/batch", tags=["Processing"])
 async def process_batch(
     raw_images: List[UploadFile] = File(..., description="Серия снимков"),
-    bright_image: UploadFile = File(..., description=t("label.bright")),
+    bright_image: Optional[UploadFile] = File(
+        None, description="Светлое поле; без него — оценка по каждому снимку отдельно (приблизительно)"
+    ),
     dark_image: Optional[UploadFile] = File(None, description=t("label.dark")),
     settings: Optional[str] = Form(None, description="CorrectionSettings в JSON"),
     format: Optional[str] = Form(None, description="tiff | png | jpeg"),
@@ -345,7 +360,9 @@ async def process_batch(
     _check_count(raw_images)
     for f in raw_images:
         _check_size(f.size, f.filename or "image")
-    bright, bright_info, _ = await _read(bright_image)
+    bright, bright_info, _ = (
+        await _read(bright_image) if bright_image and bright_image.filename else (None, None, None)
+    )
     dark, dark_info, _ = await _read(dark_image) if dark_image and dark_image.filename else (None, None, None)
     raws = [(f.filename or f"image_{i}.png", await f.read()) for i, f in enumerate(raw_images)]
     calibration = {"bright_field": bright_info, "dark_field": dark_info}

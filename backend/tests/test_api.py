@@ -258,3 +258,18 @@ def test_messages_follow_accept_language():
     assert any("fine details" in c for c in sample["checks"])
     verify = client.post("/api/verify", headers=en).json()
     assert verify["verdict"].startswith("The method is correct") and verify["rows"][1]["id"] == "flat"
+
+
+def test_batch_per_image_calibration():
+    # Без bright_id светлое поле оценивается по каждому снимку отдельно
+    response = client.post("/api/process/file", files={"raw": ("s1.png", demo_png("sample-1"))})
+    assert response.status_code == 200, response.text
+    report = json.loads(response.headers["x-correction-report"])
+    assert report["bright_field"]["estimated"]["method"] == "gaussian"
+    assert report["after"]["nonuniformity"] < report["before"]["nonuniformity"] / 3
+
+    files = [("raw_images", (f"s{i}.png", demo_png(f"sample-{i}"))) for i in (1, 2)]
+    archive = zipfile.ZipFile(io.BytesIO(client.post("/api/process/batch", files=files).content))
+    log = json.loads(archive.read("processing.json"))
+    assert log["calibration"] == "per_image" and log["approximate"] is True
+    assert {"s1_ffc.png", "s2_ffc.png"} <= set(archive.namelist())
