@@ -347,7 +347,7 @@ export default function CompareViewer({
 
       {preview && approximate && mode !== 'map' && (
         <span
-          className="pointer-events-none absolute left-1/2 top-10 z-10 max-w-[calc(100%-1rem)] -translate-x-1/2 rounded bg-amber-500/90 px-2 py-0.5 text-center text-xs font-medium text-black sm:top-2"
+          className="pointer-events-none absolute left-1/2 top-10 z-10 max-w-[calc(100%-1rem)] -translate-x-1/2 rounded bg-amber-500/90 px-2 py-0.5 text-center text-xs font-medium text-black"
           title={t('viewer.approx_title')}
         >
           {approximate}
